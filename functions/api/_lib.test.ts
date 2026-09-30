@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SOLANA_CHAIN_ID, TEMPO_CHAIN_ID } from '../../shared/assets'
 import {
+  fetchAcrossMeta,
   fetchAcrossQuote,
   fetchDepositStatus,
   validateDepositStatus,
+  validateMetaResource,
   validateQuote,
   type Env,
 } from './_lib'
@@ -63,5 +65,19 @@ describe('same-origin Across quote proxy', () => {
     const response = await fetchDepositStatus(byHash.params!, env, fetcher)
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({ status: 'filled' })
+  })
+
+  it('proxies Across swap metadata for supported chains and tokens', async () => {
+    const bad = validateMetaResource(new Request('https://swap.example/api/across-meta'))
+    expect('error' in bad).toBe(true)
+    const good = validateMetaResource(new Request('https://swap.example/api/across-meta?resource=chains'))
+    if (!('resource' in good)) throw new Error('expected valid resource')
+    expect(good.resource).toBe('chains')
+    const fetcher = vi.fn(async () => new Response(JSON.stringify([{ chainId: 4217 }]))) as unknown as typeof fetch
+    const response = await fetchAcrossMeta(good.resource!, env, fetcher)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject([{ chainId: 4217 }])
+    const url = String((fetcher as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0])
+    expect(url).toContain('/swap/chains')
   })
 })

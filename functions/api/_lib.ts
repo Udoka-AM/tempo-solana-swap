@@ -136,3 +136,32 @@ export async function fetchDepositStatus(params: URLSearchParams, env: Env, fetc
 export function tokenFor(chain: Network, id: AssetId) {
   return findAsset(chain, id)
 }
+
+const allowedMetaResources = ['chains', 'tokens'] as const
+export type MetaResource = (typeof allowedMetaResources)[number]
+
+export function validateMetaResource(request: Request): { error: Response; resource?: never } | { resource: MetaResource; error?: never } {
+  const resource = new URL(request.url).searchParams.get('resource')
+  if (resource !== 'chains' && resource !== 'tokens') return { error: apiError('missing_parameter', 400, 'resource=chains|tokens') } as const
+  return { resource } as const
+}
+
+export async function fetchAcrossMeta(resource: MetaResource, env: Env, fetcher: typeof fetch = fetch) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetcher(`${ACROSS_API}/swap/${resource}`, {
+      headers: { authorization: `Bearer ${env.ACROSS_API_KEY}`, 'user-agent': 'tempo-solana-swap/1.0' },
+      signal: controller.signal,
+    })
+  } catch (error) {
+    return apiError('meta_unavailable', 502, error instanceof Error ? error.name : 'fetch_failed')
+  } finally {
+    clearTimeout(timeout)
+  }
+  let body: unknown
+  try { body = await response.json() } catch { body = { error: 'invalid_upstream_response' } }
+  if (!response.ok) return apiError('meta_unavailable', 502, summarizeUpstream(body, response.status))
+  return json(body)
+}
