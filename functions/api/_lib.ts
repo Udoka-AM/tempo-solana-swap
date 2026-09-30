@@ -61,7 +61,7 @@ export function validateQuote(request: Request): { error: Response; params?: nev
   const destinationNetwork = toNetwork(params.get('destinationChainId'))
   if (!originNetwork || !destinationNetwork) return { error: apiError('unsupported_chain', 400) } as const
   const input = ASSETS.find((asset) => asset.network === originNetwork && asset.address.toLowerCase() === params.get('inputToken')!.toLowerCase())
-  const output = ASSETS.find((asset) => asset.network === destinationNetwork && asset.address === params.get('outputToken'))
+  const output = ASSETS.find((asset) => asset.network === destinationNetwork && asset.address.toLowerCase() === params.get('outputToken')!.toLowerCase())
   if (!input || !output || !isSupportedPair(originNetwork, input.id, destinationNetwork, output.id)) return { error: apiError('unsupported_pair', 400) } as const
   if (!/^\d+$/.test(params.get('amount')!)) return { error: apiError('invalid_amount', 400) } as const
 

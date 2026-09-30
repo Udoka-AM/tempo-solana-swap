@@ -16,8 +16,8 @@ export type ExecutionUpdate = (stage: 'switching' | 'approving' | 'submitting' |
 export const EVM_PROXY_CHAIN_ID = BASE_CHAIN_ID
 
 function requireEvmTx(tx: AcrossTransaction | undefined) {
-  if (!tx?.to || !tx.data) throw new Error('Across did not return a compatible EVM transaction. Refresh the quote.')
-  return tx
+  if (!tx?.to || !tx.data || !/^0x[0-9a-fA-F]*$/.test(tx.data)) throw new Error('Across did not return a compatible EVM transaction. Refresh the quote.')
+  return { ...tx, data: tx.data as `0x${string}` }
 }
 
 export async function executeEvmQuote(wallet: EvmWallet, quote: AcrossQuote, onUpdate: ExecutionUpdate, chainId: number = TEMPO_CHAIN_ID) {
@@ -42,8 +42,15 @@ function decodeBase64Transaction(value: string) {
   return VersionedTransaction.deserialize(bytes)
 }
 
+export function solanaTransactionData(quote: AcrossQuote) {
+  return quote.depositTx?.serializedTransaction
+    ?? quote.depositTx?.data
+    ?? quote.swapTx?.serializedTransaction
+    ?? quote.swapTx?.data
+}
+
 export async function executeSolanaQuote(wallet: SolanaWallet, quote: AcrossQuote, onUpdate: ExecutionUpdate) {
-  const serialized = quote.depositTx?.serializedTransaction ?? quote.swapTx?.serializedTransaction
+  const serialized = solanaTransactionData(quote)
   if (!serialized) throw new Error('Across did not return a supported Solana deposit. Refresh the quote.')
   const signer = await wallet.connector.getSigner?.()
   if (!signer?.signAndSendTransaction) throw new Error('The selected wallet cannot sign a Solana transaction.')

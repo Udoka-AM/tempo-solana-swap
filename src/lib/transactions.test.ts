@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { executeEvmQuote } from './transactions'
+import { executeEvmQuote, solanaTransactionData } from './transactions'
 
 describe('EVM execution sequencing', () => {
   it('switches to Tempo, sends approvals, then submits Across calldata', async () => {
@@ -10,5 +10,9 @@ describe('EVM execution sequencing', () => {
     expect(wallet.switchNetwork).toHaveBeenCalledWith(4217)
     expect(sendTransaction).toHaveBeenNthCalledWith(1, { to: '0x0000000000000000000000000000000000000001', data: '0x01', value: undefined })
     expect(sendTransaction).toHaveBeenNthCalledWith(2, { to: '0x0000000000000000000000000000000000000002', data: '0x02', value: undefined })
+  })
+
+  it('reads Across SVM calldata from swapTx.data', () => {
+    expect(solanaTransactionData({ swapTx: { ecosystem: 'svm', data: 'base64-transaction' } })).toBe('base64-transaction')
   })
 })

@@ -5,7 +5,8 @@ export type AcrossTransaction = {
   ecosystem?: 'evm' | 'svm' | 'solana'
   chainId?: number
   to?: string
-  data?: `0x${string}`
+  // EVM transactions use 0x calldata; SVM transactions use base64 here.
+  data?: string
   value?: string
   // Across's SVM response may return an encoded transaction; it is signed
   // unchanged by the wallet and never decoded into a manufactured transfer.
