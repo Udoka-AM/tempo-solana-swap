@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { DynamicWidget, useDynamicContext, useUserWallets } from '@dynamic-labs/sdk-react-core'
-import { tokenIcons } from '@web3icons/react'
+import { useDynamicContext, useDynamicModals, useUserWallets } from '@dynamic-labs/sdk-react-core'
+import { NetworkSolana, NetworkTempo, tokenIcons } from '@web3icons/react'
 import {
   ArrowUpDown,
   ArrowUpRight,
@@ -67,7 +67,8 @@ function AssetPicker({
 }
 
 export default function App() {
-  const { primaryWallet } = useDynamicContext()
+  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
+  const { setShowLinkNewWalletModal } = useDynamicModals()
   const userWallets = useUserWallets()
   const [origin, setOrigin] = useState<Direction>('tempo')
   const [inputId, setInputId] = useState<AssetId>('pathUSD')
@@ -146,6 +147,11 @@ export default function App() {
 
   function flipDirection() {
     changeOrigin(destination)
+  }
+
+  function connectNetworkWallet() {
+    if (userWallets.length > 0) setShowLinkNewWalletModal(true)
+    else setShowAuthFlow(true)
   }
 
   function reset() {
@@ -300,7 +306,6 @@ export default function App() {
               <i className="live-dot" aria-hidden />
               <span className="txt">{apiState === 'live' ? 'Live routes' : apiState === 'checking' ? 'Checking API…' : 'API degraded'}</span>
             </span>
-            <DynamicWidget buttonClassName="dynamic-button" />
           </div>
         </div>
       </header>
@@ -342,7 +347,11 @@ export default function App() {
             </button>
           </div>
 
-          <p className="connection-note">{originWallet ? `Connected · ${compactAddress(originWallet.address)}` : 'Connect a wallet in the header to sign.'}</p>
+          <div className="wallet-pair" aria-label="Wallets">
+            <WalletSlot network={origin} address={originWallet?.address} onConnect={connectNetworkWallet} label="From" />
+            <ArrowUpRight className="wallet-pair-arrow" aria-hidden />
+            <WalletSlot network={destination} address={destWallet?.address} onConnect={connectNetworkWallet} label="To" />
+          </div>
           <label className="field-label" htmlFor="send-amount">
             You send
           </label>
@@ -530,6 +539,23 @@ function explorerFor(network: Network, hash: string) {
   if (network === 'solana') return `https://solscan.io/tx/${hash}`
   if (network === 'base') return `https://basescan.org/tx/${hash}`
   return `https://explore.mainnet.tempo.xyz/tx/${hash}`
+}
+
+function WalletSlot({ network, address, onConnect, label }: { network: Network; address?: string; onConnect: () => void; label: string }) {
+  const logo = network === 'solana' ? <NetworkSolana className="slot-logo" aria-hidden /> : <NetworkTempo className="slot-logo" aria-hidden />
+  const name = network === 'solana' ? 'Solana' : 'Tempo'
+  return (
+    <div className="wallet-slot">
+      <small>{label}</small>
+      {address ? (
+        <span className="slot-chip">{logo}<strong>{name}</strong><b>{compactAddress(address)}</b></span>
+      ) : (
+        <button type="button" className="slot-connect" onClick={onConnect} aria-label={`Connect ${name} wallet`}>
+          {logo} Connect {name}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function Row({ label, value }: { label: string; value: string }) {

@@ -175,7 +175,17 @@ button:disabled { cursor: not-allowed; }
 .chain-tabs button { background: none; border: 0; padding: 12px 8px; font-size: 11px; color: var(--muted); }
 .chain-tabs button[aria-pressed="true"] { background: var(--ink); color: var(--bg); font-weight: 700; }
 .field-label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 8px; }
-.connection-note { color: var(--muted); font-size: 11px; margin: -4px 0 20px; }
+.wallet-pair { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: end; gap: 8px; margin: -4px 0 20px; }
+.wallet-pair-arrow { justify-self: center; color: var(--accent); margin-bottom: 10px; }
+.wallet-slot { display: grid; gap: 6px; min-width: 0; }
+.wallet-slot > small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.slot-chip, .slot-connect { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 10px; font-size: 11px; min-width: 0; }
+.slot-chip { background: var(--bg); }
+.slot-chip strong { font-size: 11px; }
+.slot-chip b { margin-left: auto; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+.slot-connect { background: var(--surface); color: var(--ink); font-weight: 700; justify-content: flex-start; cursor: pointer; }
+.slot-connect:hover { border-color: var(--accent); color: var(--accent); }
+.slot-logo { width: 20px; height: 20px; flex: none; border-radius: 50%; }
 .amount, .receive {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -355,6 +365,8 @@ button:disabled { cursor: not-allowed; }
   .hero { padding: 32px 0 22px; }
   .hero h1 { font-size: clamp(26px, 8vw, 34px); }
   .swap-card { padding: 16px; }
+  .wallet-pair { grid-template-columns: 1fr; gap: 10px; }
+  .wallet-pair-arrow { transform: rotate(90deg); margin: 0 auto; }
   .chain-tabs button { min-height: 44px; font-size: 12px; }
   .process-grid { grid-template-columns: 1fr 1fr; gap: 22px 14px; }
   .amount input, .receive > strong { font-size: 21px; }
