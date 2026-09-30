@@ -332,6 +332,7 @@ button:disabled { cursor: not-allowed; }
 .route-arrived { animation: arrived-pulse 1.6s ease-out infinite; }
 @keyframes arrived-pulse { 0% { opacity: 1; } 50% { opacity: 0.45; } 100% { opacity: 1; } }
 .route-caption { font-size: 10px; fill: var(--muted); font-family: inherit; letter-spacing: 0.06em; }
+.route-proxy { font-size: 8px; fill: var(--bg); font-family: inherit; letter-spacing: 0.08em; }
 .route-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; color: var(--muted); padding: 8px 2px 2px; }
 .route-meta b { color: var(--ink); }
 .route-viz[data-phase="error"] .route-meta b { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }

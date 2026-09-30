@@ -1,16 +1,19 @@
 import { isAnimatingPhase, phaseLabel, type RoutePhase } from '../lib/route-viz'
 
 type Props = {
-  origin: string
-  destination: string
+  stations: [string, string, string]
   phase: RoutePhase
 }
 
-// High-definition SVG route: Tempo node -> Across bridge path -> Solana node.
-// Crisp at any DPR (vector, non-scaling stroke), functional motion only:
-// the packet travels while loading/submitting, the trail solidifies on ready.
-export default function RoutePath({ origin, destination, phase }: Props) {
-  const label = phaseLabel(phase, origin, destination)
+// High-definition SVG route: origin -> Base proxy -> destination, bridged by
+// Across across two hops. Crisp at any DPR (vector, non-scaling stroke) with
+// functional motion only: the packet travels while loading/submitting, the
+// trail solidifies on ready.
+const X = [72, 320, 568]
+const TRACK = `M${X[0]} 60 C 150 60, 170 60, ${X[1]} 60 S 470 60, ${X[2]} 60`
+
+export default function RoutePath({ stations, phase }: Props) {
+  const label = `${phaseLabel(phase, stations[0], `${stations[2]} via ${stations[1]}`)}: hop 1 ${stations[0]} to ${stations[1]}, hop 2 ${stations[1]} to ${stations[2]}`
   const active = phase === 'ready' || phase === 'submitted'
   const failed = phase === 'error'
   const animating = isAnimatingPhase(phase)
@@ -33,7 +36,7 @@ export default function RoutePath({ origin, destination, phase }: Props) {
         {/* base track */}
         <path
           id="route-track"
-          d="M72 60 C 200 60, 240 60, 320 60 S 440 60, 568 60"
+          d={TRACK}
           fill="none"
           stroke="var(--line-soft)"
           strokeWidth={2}
@@ -43,7 +46,7 @@ export default function RoutePath({ origin, destination, phase }: Props) {
         {/* live trail */}
         <path
           className={animating ? 'route-trail is-animating' : 'route-trail'}
-          d="M72 60 C 200 60, 240 60, 320 60 S 440 60, 568 60"
+          d={TRACK}
           fill="none"
           stroke={failed ? 'var(--line-soft)' : 'url(#route-trail)'}
           strokeWidth={active || animating ? 2.5 : 2}
@@ -60,36 +63,35 @@ export default function RoutePath({ origin, destination, phase }: Props) {
             </animateMotion>
           </circle>
         )}
-        {active && <circle cx={568} cy={60} r={5} className="route-arrived" fill="var(--accent)" />}
-        {/* origin node */}
-        <g className={`route-node ${phase !== 'idle' && !failed ? 'is-live' : ''}`}>
-          <circle cx={72} cy={60} r={16} fill="var(--surface)" stroke="var(--ink)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-          <circle cx={72} cy={60} r={5} fill="var(--ink)" />
+        {active && <circle cx={X[2]} cy={60} r={5} className="route-arrived" fill="var(--accent)" />}
+        {/* station nodes */}
+        {X.map((x, index) => (
+          <g key={stations[index]} className={`route-node ${phase !== 'idle' && !failed ? 'is-live' : ''}`}>
+            <circle cx={x} cy={60} r={16} fill="var(--surface)" stroke="var(--ink)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            <circle cx={x} cy={60} r={5} fill={index === 2 && active ? 'var(--accent)' : 'var(--ink)'} />
+          </g>
+        ))}
+        {/* proxy marker */}
+        <g aria-hidden="true">
+          <rect x={X[1] - 14} y={22} width={28} height={16} rx={4} fill="var(--ink)" />
+          <text x={X[1]} y={34} textAnchor="middle" className="route-proxy">
+            PROXY
+          </text>
         </g>
-        {/* across relay node */}
-        <g className={`route-node ${animating || active ? 'is-live' : ''}`}>
-          <rect x={306} y={46} width={28} height={28} rx={6} fill="var(--surface)" stroke="var(--ink)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-          <path d="M313 60 h14 M320 53 v14" stroke="var(--accent)" strokeWidth={2.5} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-        </g>
-        {/* destination node */}
-        <g className={`route-node ${active ? 'is-live' : ''}`}>
-          <circle cx={568} cy={60} r={16} fill="var(--surface)" stroke="var(--ink)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-          <circle cx={568} cy={60} r={5} fill={active ? 'var(--accent)' : 'var(--muted)'} />
-        </g>
-        <text x={72} y={102} textAnchor="middle" className="route-caption">
-          {origin}
+        <text x={X[0]} y={102} textAnchor="middle" className="route-caption">
+          {stations[0]}
         </text>
-        <text x={320} y={102} textAnchor="middle" className="route-caption">
-          ACROSS
+        <text x={X[1]} y={102} textAnchor="middle" className="route-caption">
+          {stations[1]}
         </text>
-        <text x={568} y={102} textAnchor="middle" className="route-caption">
-          {destination}
+        <text x={X[2]} y={102} textAnchor="middle" className="route-caption">
+          {stations[2]}
         </text>
       </svg>
       <div className="route-meta" aria-hidden="true">
-        <span>{origin}</span>
-        <b>{failed ? 'NO LIVE ROUTE' : active ? 'LIVE QUOTE' : animating ? 'FETCHING…' : 'ACROSS'}</b>
-        <span>{destination}</span>
+        <span>HOP 1 · {stations[0]} → {stations[1]}</span>
+        <b>{failed ? 'NO LIVE ROUTE' : active ? 'LIVE 2-HOP QUOTE' : animating ? 'FETCHING…' : 'ACROSS ×2'}</b>
+        <span>HOP 2 · {stations[1]} → {stations[2]}</span>
       </div>
     </div>
   )

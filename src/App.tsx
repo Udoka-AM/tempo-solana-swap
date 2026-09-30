@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   Wallet,
 } from 'lucide-react'
-import { assetsFor, findAsset, isSupportedPair, type Asset, type AssetId, type Network } from '../shared/assets'
+import { assetsFor, chainIdFor, findAsset, isSupportedPair, type Asset, type AssetId, type Network } from '../shared/assets'
 import { compactAddress, formatAmount, fromAtomicAmount } from './lib/format'
 import {
   getDepositStatus,
@@ -26,6 +26,7 @@ import {
 } from './lib/quote'
 import type { RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
+import { hopParties, planHops } from './lib/multihop'
 import { pickWallets, walletNetwork } from './lib/wallets'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
 import { loadBalances, type BalanceState } from './lib/balances'
@@ -38,7 +39,7 @@ const TokenUSDC = tokenIcons.TokenUSDC
 const TokenSOL = tokenIcons.TokenSOL
 
 type StatusKind = 'idle' | 'loading' | 'ready' | 'error' | 'submitting' | 'submitted'
-type Status = { kind: StatusKind; message?: string; reference?: string }
+type Status = { kind: StatusKind; message?: string; reference?: string; references?: string[] }
 
 function Icon({ asset }: { asset: Asset }) {
   if (asset.id === 'USDC') return <TokenUSDC className="token" aria-hidden />
@@ -84,7 +85,6 @@ export default function App() {
   const [outputId, setOutputId] = useState<AssetId>('USDC')
   const [amount, setAmount] = useState('')
   const [destinationInput, setDestinationInput] = useState(() => loadSavedDestination('solana'))
-  const [quote, setQuote] = useState<AcrossQuote>()
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [review, setReview] = useState(false)
   const [apiState, setApiState] = useState<'checking' | 'live' | 'degraded'>('checking')
@@ -115,24 +115,41 @@ export default function App() {
   const originWallet =
     primaryWallet && walletNetwork(primaryWallet) === origin ? primaryWallet : wallets[origin]
   const destWallet = wallets[destination]
-  const supported = isSupportedPair(origin, input.id, destination, output.id)
+  // Multihop corridor via Base: Tempo -> Base USDC -> Solana USDC (or reverse).
+  // Ends are selectable; the proxy hop is automatic.
+  const hops = useMemo(() => planHops(origin, inputId, outputId), [origin, inputId, outputId])
+  const supported = Boolean(hops) && hops!.every((hop) => isSupportedPair(hop.origin, hop.input.id, hop.destination, hop.output.id))
   // One signing wallet + a destination address. The destination comes from a
   // second connected wallet when present, else from the pasted (saved) input.
   const manualRecipient = destinationInput.trim()
   const manualError = manualRecipient ? validateAddressFor(destination, manualRecipient) : undefined
   const recipientAddress = !manualError && manualRecipient ? manualRecipient : destWallet?.address
-  const [quoteMeta, setQuoteMeta] = useState<{ depositor: string; recipient: string }>()
+  const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
+  const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
   const quoteLive = Boolean(
-    quote && quoteMeta && originWallet?.address === quoteMeta.depositor && recipientAddress === quoteMeta.recipient,
+    hops &&
+      hopQuotes.length === 2 &&
+      hopMetas.length === 2 &&
+      originWallet?.address === hopMetas[0]?.depositor &&
+      recipientAddress === hopMetas[1]?.recipient &&
+      (origin === 'tempo' || wallets.tempo?.address === hopMetas[1]?.depositor),
   )
-  const receive = quote?.expectedOutputAmount ? fromAtomicAmount(quote.expectedOutputAmount, output.decimals) : undefined
-  const relayFee = quote?.totalRelayFee?.total ? fromAtomicAmount(quote.totalRelayFee.total, input.decimals) : undefined
+  const hop1Out = hopQuotes[0]?.expectedOutputAmount
+    ? fromAtomicAmount(hopQuotes[0].expectedOutputAmount, hops?.[0].output.decimals ?? 6)
+    : undefined
+  const receive = hopQuotes[1]?.expectedOutputAmount
+    ? fromAtomicAmount(hopQuotes[1].expectedOutputAmount, hops?.[1].output.decimals ?? 6)
+    : undefined
+  const hopFees = [0, 1].map((index) => {
+    const total = hopQuotes[index]?.totalRelayFee?.total
+    return total && hops ? fromAtomicAmount(total, hops[index].input.decimals) : undefined
+  })
   const busy = status.kind === 'loading' || status.kind === 'submitting'
   const originConnected = Boolean(originWallet)
 
   function clearQuote() {
-    setQuote(undefined)
-    setQuoteMeta(undefined)
+    setHopQuotes([])
+    setHopMetas([])
   }
 
   function changeOrigin(next: Direction) {
@@ -162,33 +179,50 @@ export default function App() {
       setStatus({ kind: 'error', message: manualError })
       return
     }
-    // Only the sending wallet signs. The destination is the second connected
-    // wallet when present, else the pasted address. Missing sides fall back
-    // to placeholders for a preview that can never be signed.
-    const depositor = originWallet?.address ?? previewAddressFor(origin)
-    const destinationAddress = recipientAddress ?? previewAddressFor(destination)
-    const live = Boolean(originWallet && recipientAddress)
-    setStatus({ kind: 'loading', message: live ? 'Checking the live Across route…' : 'Checking a preview route…' })
+    if (!hops) {
+      setStatus({ kind: 'error', message: 'This pair cannot form a Tempo ↔ Base ↔ Solana route.' })
+      return
+    }
+    // Hop 1 prices the send amount; hop 2 prices hop 1's output. Only the
+    // sending wallet signs hop 1 and the EVM side signs hop 2 — missing
+    // sides fall back to placeholders for a preview that can never be signed.
+    const sender = originWallet?.address ?? previewAddressFor(origin)
+    const final = recipientAddress ?? previewAddressFor(destination)
+    const [parties1, parties2] = hopParties(origin, sender, final)
+    const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo))
+    setStatus({ kind: 'loading', message: 'Checking hop 1 of 2…' })
     try {
-      const result = await requestQuote({
-        origin,
-        destination,
-        input,
-        output,
+      const first = await requestQuote({
+        origin: hops[0].origin,
+        destination: hops[0].destination,
+        input: hops[0].input,
+        output: hops[0].output,
         amount,
-        depositor,
-        recipient: destinationAddress,
+        depositor: parties1.depositor,
+        recipient: parties1.recipient,
       })
-      setQuote(result)
-      setQuoteMeta({ depositor, recipient: destinationAddress })
+      const firstOut = fromAtomicAmount(first.expectedOutputAmount, hops[0].output.decimals)
+      if (!firstOut) throw new Error('Hop 1 returned no output amount.')
+      setStatus({ kind: 'loading', message: 'Checking hop 2 of 2…' })
+      const second = await requestQuote({
+        origin: hops[1].origin,
+        destination: hops[1].destination,
+        input: hops[1].input,
+        output: hops[1].output,
+        amount: firstOut,
+        depositor: parties2.depositor,
+        recipient: parties2.recipient,
+      })
+      setHopQuotes([first, second])
+      setHopMetas([parties1, parties2])
       if (manualRecipient && !manualError) saveDestination(destination, manualRecipient)
       setStatus({
         kind: 'ready',
         message: live
-          ? 'Route ready for review.'
+          ? 'Two-hop route ready for review.'
           : !originWallet
-            ? 'Preview quote — connect your sending wallet to sign.'
-            : 'Preview quote — add a destination address to sign.',
+            ? 'Preview route — connect your sending wallet to sign.'
+            : 'Preview route — add a destination address to sign.',
       })
       if (openReview) setReview(true)
     } catch (error) {
@@ -197,11 +231,11 @@ export default function App() {
     }
   }
 
-  // When the signing wallet or destination lands after a preview quote,
-  // silently upgrade to an executable live quote. The preview guard runs once.
+  // When the signing wallet or destination lands after a preview, silently
+  // upgrade to an executable live route. The preview guard runs once.
   useEffect(() => {
-    if (!quote || !quoteMeta || !originWallet || !recipientAddress || !amount) return
-    if (!isPreviewAddress(quoteMeta.depositor) && !isPreviewAddress(quoteMeta.recipient)) return
+    if (hopQuotes.length !== 2 || hopMetas.length !== 2 || !originWallet || !recipientAddress || !amount) return
+    if (hopMetas.every((meta) => !isPreviewAddress(meta.depositor) && !isPreviewAddress(meta.recipient))) return
     void getQuote(false)
     // getQuote is intentionally excluded: the preview guard prevents loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -222,22 +256,50 @@ export default function App() {
   }, [wallets.tempo?.address, wallets.solana?.address])
 
   async function submit() {
-    if (!quote || !originWallet || !quoteLive) return
-    const update: ExecutionUpdate = (stage, reference) =>
-      setStatus({
-        kind: stage === 'submitted' ? 'submitted' : 'submitting',
-        reference,
-        message: {
-          switching: 'Switching wallet to Tempo…',
-          approving: 'Approval requested in wallet…',
-          submitting: 'Review and sign in your wallet…',
-          submitted: 'Submitted. Across is delivering the route.',
-        }[stage],
-      })
+    if (!hops || hopQuotes.length !== 2 || !originWallet || !quoteLive) return
+    const evmWallet = origin === 'tempo' ? originWallet : wallets.tempo
+    if (!evmWallet) {
+      setStatus({ kind: 'error', message: 'Connect an EVM wallet to sign the Base hop.' })
+      return
+    }
+    const chainName = (network: Network) => (network === 'tempo' ? 'Tempo' : network === 'base' ? 'Base' : 'Solana')
+    async function runHop(index: 0 | 1) {
+      const hop = hops![index]
+      const label = `Hop ${index + 1} of 2 (${chainName(hop.origin)} → ${chainName(hop.destination)})`
+      let hash: string | undefined
+      const update: ExecutionUpdate = (stage, reference) => {
+        if (stage === 'submitted' && reference) hash = reference
+        setStatus({
+          kind: 'submitting',
+          reference,
+          message:
+            stage === 'switching'
+              ? `${label}: switching wallet to ${chainName(hop.origin)}…`
+              : stage === 'approving'
+                ? `${label}: approval requested in wallet…`
+                : `${label}: review and sign in your wallet…`,
+        })
+      }
+      if (hop.origin === 'solana') {
+        await executeSolanaQuote(originWallet as never, hopQuotes[index], update)
+      } else {
+        await executeEvmQuote(evmWallet as never, hopQuotes[index], update, chainIdFor(hop.origin))
+      }
+      if (!hash) throw new Error(`${label} did not return a transaction hash.`)
+      return hash
+    }
     try {
       setReview(false)
-      if (origin === 'tempo') await executeEvmQuote(originWallet as never, quote, update)
-      else await executeSolanaQuote(originWallet as never, quote, update)
+      setStatus({ kind: 'submitting', message: 'Submitting hop 1 of 2…' })
+      const hash1 = await runHop(0)
+      setStatus({ kind: 'submitting', reference: hash1, references: [hash1], message: 'Hop 1 submitted — sign hop 2 of 2…' })
+      const hash2 = await runHop(1)
+      setStatus({
+        kind: 'submitted',
+        reference: hash2,
+        references: [hash1, hash2],
+        message: 'Both hops submitted. Across is delivering the final leg.',
+      })
     } catch (error) {
       setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Transaction was not submitted.' })
     }
@@ -250,13 +312,14 @@ export default function App() {
     : !amount
       ? 'Enter an amount'
       : quoteLive
-        ? 'Review live route'
-        : quote
-          ? 'Refresh quote'
+        ? 'Review 2-hop route'
+        : hopQuotes.length === 2
+          ? 'Refresh route'
           : originConnected && recipientAddress
-            ? 'Get live quote'
+            ? 'Get live route'
             : 'Preview route'
-  const canSign = originConnected && Boolean(recipientAddress) && !manualError
+  const canSign =
+    originConnected && Boolean(recipientAddress) && !manualError && (origin === 'tempo' || Boolean(wallets.tempo))
 
   const routePhase: RoutePhase =
     status.kind === 'loading'
@@ -267,7 +330,7 @@ export default function App() {
           ? 'submitted'
           : status.kind === 'error'
             ? 'error'
-            : quote
+            : hopQuotes.length === 2
               ? 'ready'
               : 'idle'
 
@@ -318,21 +381,21 @@ export default function App() {
       <section className="shell hero">
         <div className="hero-grid">
           <div>
-            <p className="kicker">Stablecoin corridor · Non-custodial</p>
+            <p className="kicker">Stablecoin corridor · Non-custodial · 2 hops via Base</p>
             <h1>
               One deliberate route between <em>Tempo</em> and Solana.
             </h1>
             <p className="hero-sub">
-              Move a supported stablecoin through a live Across quote. Your wallet approves every step — this app never
-              holds keys or submits for you.
+              Hop through Base as a proxy: two live Across quotes, two signatures. Your wallet approves every step —
+              this app never holds keys or submits for you.
             </p>
           </div>
           <aside className="scope-card" id="scope" aria-label="Release scope">
             <small>RELEASE SCOPE</small>
             <strong>
-              pathUSD / USDC.e <b>↔</b> USDC
+              pathUSD / USDC.e <b>↔</b> USDC <b>via Base</b>
             </strong>
-            <span>Tempo 4217 · Solana mainnet · SOL is gas only</span>
+            <span>Tempo 4217 · Base 8453 · Solana mainnet · SOL is gas only</span>
           </aside>
         </div>
       </section>
@@ -440,11 +503,11 @@ export default function App() {
           </div>
           <small className="field-hint">
             {status.kind === 'loading'
-              ? 'Fetching the route — works with or without a connected wallet.'
-              : quote
+              ? 'Fetching hop 1, then hop 2 — works with or without a connected wallet.'
+              : hopQuotes.length === 2
                 ? quoteLive
-                  ? 'Expected output from the live Across quote.'
-                  : 'Preview price — connect your sending wallet and add a destination to sign.'
+                  ? 'Expected output across both hops, via Base.'
+                  : 'Preview price across both hops — connect your sending wallet and add a destination to sign.'
                 : 'Request a quote to see what you receive. No wallet or balance needed.'}
           </small>
 
@@ -480,7 +543,10 @@ export default function App() {
             )}
           </small>
 
-          <RoutePath origin={origin.toUpperCase()} destination={destination.toUpperCase()} phase={routePhase} />
+          <RoutePath
+            stations={[origin.toUpperCase(), 'BASE', destination.toUpperCase()]}
+            phase={routePhase}
+          />
 
           <div aria-live="polite">
             {status.kind === 'error' && (
@@ -494,25 +560,22 @@ export default function App() {
                 <Check size={16} aria-hidden />
                 <span>
                   {status.message}{' '}
-                  {status.reference && (
+                  {(status.references ?? (status.reference ? [status.reference] : [])).map((hash, index) => (
                     <a
+                      key={hash}
                       target="_blank"
                       rel="noreferrer"
-                      href={
-                        origin === 'tempo'
-                          ? `https://explore.mainnet.tempo.xyz/tx/${status.reference}`
-                          : `https://solscan.io/tx/${status.reference}`
-                      }
+                      href={explorerFor(hops?.[index]?.origin ?? origin, hash)}
                     >
-                      View <ExternalLink size={12} aria-hidden />
+                      Hop {index + 1} <ExternalLink size={12} aria-hidden />{' '}
                     </a>
-                  )}
+                  ))}
                 </span>
               </p>
             )}
             {status.kind === 'submitted' && status.reference && (
               <div className="deposit-track" aria-live="polite">
-                <strong>Bridging hop: {delivery?.status ? delivery.status : 'submitted — not yet checked'}</strong>
+                <strong>Final hop: {delivery?.status ? delivery.status : 'submitted — not yet checked'}</strong>
                 <span>
                   {delivery?.fillTx || delivery?.fillTxnRef
                     ? `Fill tx: ${compactAddress(delivery.fillTx ?? delivery.fillTxnRef)}`
@@ -553,9 +616,9 @@ export default function App() {
               )}
             </div>
           )}
-          {canSign && quote && !quoteLive && (
+          {canSign && hopQuotes.length === 2 && !quoteLive && (
             <div className="link-wrap">
-              <small className="field-hint">Details changed — refresh for an executable live quote.</small>
+              <small className="field-hint">Details changed — refresh for an executable live route.</small>
             </div>
           )}
           {!supported && (
@@ -567,16 +630,27 @@ export default function App() {
           <h2>
             ROUTE DETAILS <ShieldCheck size={16} aria-hidden />
           </h2>
-          <Row label="Route" value={supported ? `${input.symbol} → ${output.symbol}` : 'Unavailable'} />
-          <Row label="Provider" value="Across" />
-          <Row label="Relay fee" value={relayFee ? `${formatAmount(relayFee)} ${input.symbol}` : 'In live quote'} />
+          <Row label="Route" value={supported && hops ? `${hops[0].input.symbol} → USDC → ${hops[1].output.symbol}` : 'Unavailable'} />
+          <Row label="Provider" value="Across ×2" />
+          <Row
+            label="Hop 1 fee"
+            value={hopFees[0] && hops ? `${formatAmount(hopFees[0])} ${hops[0].input.symbol}` : 'In live quote'}
+          />
+          <Row
+            label="Hop 2 fee"
+            value={hopFees[1] && hops ? `${formatAmount(hopFees[1])} ${hops[1].input.symbol}` : 'In live quote'}
+          />
           <Row
             label="Delivery"
-            value={quote?.expectedFillTime ? `~${quote.expectedFillTime} seconds` : 'In live quote'}
+            value={
+              hopQuotes[0]?.expectedFillTime || hopQuotes[1]?.expectedFillTime
+                ? `~${(hopQuotes[0]?.expectedFillTime ?? 0) + (hopQuotes[1]?.expectedFillTime ?? 0)} seconds`
+                : 'In live quote'
+            }
           />
           <div className="details-note">
             <b>Before you sign</b>
-            <p>Check the amount, recipient, route and fee in your wallet. A fresh quote is required if it expires.</p>
+            <p>Two signatures, one per hop. Check amounts, recipient, route and fees in your wallet. Fresh quotes are required if they expire.</p>
           </div>
         </aside>
       </section>
@@ -585,9 +659,9 @@ export default function App() {
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
           <Step n="01" t="Connect" d="Connect your sending wallet once — EVM or Solana." />
-          <Step n="02" t="Quote" d="Paste the destination address; preview or live quotes price instantly." />
-          <Step n="03" t="Sign" d="Your wallet approves and submits the bridge deposit." />
-          <Step n="04" t="Receive" d="Track the submitted route through to delivery." />
+          <Step n="02" t="Quote" d="Paste the destination; both hops via Base price instantly." />
+          <Step n="03" t="Sign" d="Approve hop 1 to Base, then hop 2 onward — two signatures." />
+          <Step n="04" t="Receive" d="Track both hops through to final delivery." />
         </div>
       </section>
 
@@ -615,11 +689,25 @@ export default function App() {
               </Dialog.Title>
               <Dialog.Description asChild>
                 <div>
-                  <Row label="Send from" value={compactAddress(quoteMeta?.depositor)} />
-                  <Row label="Receive at" value={compactAddress(quoteMeta?.recipient)} />
                   <Row
-                    label="Fee"
-                    value={relayFee ? `${formatAmount(relayFee)} ${input.symbol}` : 'Included in quote'}
+                    label="Hop 1"
+                    value={`${formatAmount(amount)} ${hops?.[0].input.symbol ?? ''} → ${hop1Out ? formatAmount(hop1Out) : '—'} ${hops?.[0].output.symbol ?? ''}`}
+                  />
+                  <Row
+                    label="Hop 2"
+                    value={`${hop1Out ? formatAmount(hop1Out) : '—'} ${hops?.[1].input.symbol ?? ''} → ${receive ? formatAmount(receive) : '—'} ${hops?.[1].output.symbol ?? ''}`}
+                  />
+                  <Row label="Send from" value={compactAddress(hopMetas[0]?.depositor)} />
+                  <Row label="Receive at" value={compactAddress(hopMetas[1]?.recipient)} />
+                  <Row
+                    label="Fees"
+                    value={
+                      hopFees[0] || hopFees[1]
+                        ? [hopFees[0] && hops ? `${formatAmount(hopFees[0])} ${hops[0].input.symbol}` : null, hopFees[1] && hops ? `${formatAmount(hopFees[1])} ${hops[1].input.symbol}` : null]
+                            .filter(Boolean)
+                            .join(' + ')
+                        : 'Included in quotes'
+                    }
                   />
                 </div>
               </Dialog.Description>
@@ -627,7 +715,7 @@ export default function App() {
                 <CircleAlert size={16} aria-hidden />
                 <span>
                   {quoteLive
-                    ? 'No transaction has been submitted. The next step opens your sending wallet.'
+                    ? 'No transaction has been submitted. Two signatures follow — one per hop.'
                     : 'Preview only — connect your sending wallet and add a destination address for an executable route.'}
                 </span>
               </p>
@@ -656,6 +744,12 @@ export default function App() {
       </footer>
     </main>
   )
+}
+
+function explorerFor(network: Network, hash: string) {
+  if (network === 'solana') return `https://solscan.io/tx/${hash}`
+  if (network === 'base') return `https://basescan.org/tx/${hash}`
+  return `https://explore.mainnet.tempo.xyz/tx/${hash}`
 }
 
 function WalletCard({ chain, address, connected, hint }: { chain: string; address?: string; connected: boolean; hint: string }) {
