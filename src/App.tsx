@@ -1,41 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
 import { DynamicWidget, useDynamicContext, useUserWallets } from '@dynamic-labs/sdk-react-core'
 import { tokenIcons } from '@web3icons/react'
 import {
   ArrowUpDown,
   ArrowUpRight,
-  Check,
   CircleAlert,
   ExternalLink,
   LoaderCircle,
   RefreshCw,
-  ShieldCheck,
-  Wallet,
 } from 'lucide-react'
 import { assetsFor, chainIdFor, findAsset, isSupportedPair, type Asset, type AssetId, type Network } from '../shared/assets'
 import { compactAddress, formatAmount, fromAtomicAmount, sanitizeAmount } from './lib/format'
 import {
-  getDepositStatus,
   getHealth,
   isPreviewAddress,
   previewAddressFor,
-  quoteFeeUsd,
   requestQuote,
   type AcrossQuote,
-  type DepositStatus,
 } from './lib/quote'
-import type { RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
 import { pickWallets, walletNetwork } from './lib/wallets'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
-import { loadBalances, type BalanceState } from './lib/balances'
-import RoutePath from './components/RoutePath'
-import FeeBreakdown from './components/FeeBreakdown'
-import type { HopFeeDatum } from './lib/fees'
-import Backdrop from './components/Backdrop'
-import Balances from './components/Balances'
 import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
 
 const TokenUSDC = tokenIcons.TokenUSDC
@@ -81,7 +67,7 @@ function AssetPicker({
 }
 
 export default function App() {
-  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
+  const { primaryWallet } = useDynamicContext()
   const userWallets = useUserWallets()
   const [origin, setOrigin] = useState<Direction>('tempo')
   const [inputId, setInputId] = useState<AssetId>('pathUSD')
@@ -89,12 +75,9 @@ export default function App() {
   const [amount, setAmount] = useState('')
   const [destinationInput, setDestinationInput] = useState(() => loadSavedDestination('solana'))
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
-  const [review, setReview] = useState(false)
+  const [attemptSig, setAttemptSig] = useState('')
   const [apiState, setApiState] = useState<'checking' | 'live' | 'degraded'>('checking')
-  const [delivery, setDelivery] = useState<DepositStatus | null>(null)
-  const [deliveryState, setDeliveryState] = useState<'idle' | 'checking' | 'error'>('idle')
-  const [balances, setBalances] = useState<BalanceState[]>([])
-  const [balancesLoading, setBalancesLoading] = useState(false)
+  const [successOpen, setSuccessOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -140,29 +123,11 @@ export default function App() {
   const receive = hopQuotes[1]?.expectedOutputAmount
     ? fromAtomicAmount(hopQuotes[1].expectedOutputAmount, hops?.[1].output.decimals ?? 6)
     : undefined
-  const hopFees = [0, 1].map((index) => {
-    const total = hopQuotes[index]?.totalRelayFee?.total
-    return total && hops ? fromAtomicAmount(total, hops[index].input.decimals) : undefined
-  })
-  const feeData: HopFeeDatum[] = hops
-    ? hops.map((hop, index) => ({
-        from: hop.origin === 'tempo' ? 'Tempo' : hop.origin === 'base' ? 'Base' : 'Solana',
-        to: hop.destination === 'tempo' ? 'Tempo' : hop.destination === 'base' ? 'Base' : 'Solana',
-        display:
-          hopFees[index] !== undefined
-            ? `${formatAmount(hopFees[index])} ${hop.input.symbol}`
-            : `In live quote`,
-        amountUsd: hopQuotes[index] ? quoteFeeUsd(hopQuotes[index]) : undefined,
-        fillSeconds: hopQuotes[index]?.expectedFillTime,
-      }))
-    : []
-  const feeDataLive = hopQuotes.length === 2 ? feeData : []
   const deliverySeconds =
     hopQuotes[0]?.expectedFillTime || hopQuotes[1]?.expectedFillTime
       ? (hopQuotes[0]?.expectedFillTime ?? 0) + (hopQuotes[1]?.expectedFillTime ?? 0)
       : undefined
   const busy = status.kind === 'loading' || status.kind === 'submitting'
-  const originConnected = Boolean(originWallet)
 
   function clearQuote() {
     setHopQuotes([])
@@ -187,17 +152,16 @@ export default function App() {
     setAmount('')
     clearQuote()
     setStatus({ kind: 'idle' })
-    setDelivery(null)
-    setDeliveryState('idle')
+    setSuccessOpen(false)
   }
 
-  async function getQuote(openReview = true) {
+  async function getQuote() {
     if (manualError) {
       setStatus({ kind: 'error', message: manualError })
       return
     }
     if (!hops) {
-      setStatus({ kind: 'error', message: 'This pair cannot form a Tempo ↔ Base ↔ Solana route.' })
+      setStatus({ kind: 'error', message: 'This pair cannot form a route.' })
       return
     }
     // Hop 1 prices the send amount; hop 2 prices hop 1's output. Only the
@@ -235,41 +199,40 @@ export default function App() {
       setStatus({
         kind: 'ready',
         message: live
-          ? 'Route ready for review.'
+          ? 'Route ready.'
           : !originWallet
-            ? 'Preview route — connect your sending wallet to sign.'
-            : 'Preview route — add a destination address to sign.',
+            ? 'Preview — connect your sending wallet to sign.'
+            : 'Preview — add a destination address to sign.',
       })
-      if (openReview) setReview(true)
     } catch (error) {
       clearQuote()
       setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Quote unavailable.' })
     }
   }
 
+  // Automatic route preview: typing an amount prices the route without any
+  // tap. Runs once per unique request signature so failures never loop.
+  const requestSig = `${origin}|${inputId}|${outputId}|${amount}|${destinationInput}`
+  useEffect(() => {
+    if (!amount || !supported || busy || hopQuotes.length === 2 || requestSig === attemptSig) return
+    const timer = setTimeout(() => {
+      setAttemptSig(requestSig)
+      void getQuote()
+    }, 700)
+    return () => clearTimeout(timer)
+    // getQuote excluded by design; requestSig + attemptSig gate every run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestSig, attemptSig, amount, supported, busy, hopQuotes.length])
+
   // When the signing wallet or destination lands after a preview, silently
   // upgrade to an executable live route. The preview guard runs once.
   useEffect(() => {
     if (hopQuotes.length !== 2 || hopMetas.length !== 2 || !originWallet || !recipientAddress || !amount) return
     if (hopMetas.every((meta) => !isPreviewAddress(meta.depositor) && !isPreviewAddress(meta.recipient))) return
-    void getQuote(false)
+    void getQuote()
     // getQuote is intentionally excluded: the preview guard prevents loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originWallet?.address, recipientAddress])
-
-  async function refreshBalances() {
-    setBalancesLoading(true)
-    try {
-      setBalances(await loadBalances({ tempo: wallets.tempo?.address, solana: wallets.solana?.address }))
-    } finally {
-      setBalancesLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    void refreshBalances()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallets.tempo?.address, wallets.solana?.address])
 
   async function submit() {
     if (!hops || hopQuotes.length !== 2 || !originWallet || !quoteLive) return
@@ -304,7 +267,6 @@ export default function App() {
       return hash
     }
     try {
-      setReview(false)
       setStatus({ kind: 'submitting', message: 'Submitting signature 1 of 2…' })
       const hash1 = await runHop(0)
       setStatus({ kind: 'submitting', reference: hash1, references: [hash1], message: 'First signature done — sign the second…' })
@@ -315,56 +277,14 @@ export default function App() {
         references: [hash1, hash2],
         message: 'Submitted. Your funds are on their way.',
       })
+      setSuccessOpen(true)
     } catch (error) {
       setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Transaction was not submitted.' })
     }
   }
 
-  const primaryLabel = busy
-    ? status.kind === 'loading'
-      ? 'Finding route…'
-      : 'Waiting for wallet…'
-    : !amount
-      ? 'Enter an amount'
-      : quoteLive
-        ? 'Review route'
-        : hopQuotes.length === 2
-          ? 'Refresh route'
-          : originConnected && recipientAddress
-            ? 'Get live route'
-            : 'Preview route'
-  const canSign =
-    originConnected && Boolean(recipientAddress) && !manualError && (origin === 'tempo' || Boolean(wallets.tempo))
-
-  const routePhase: RoutePhase =
-    status.kind === 'loading'
-      ? 'loading'
-      : status.kind === 'submitting'
-        ? 'submitting'
-        : status.kind === 'submitted'
-          ? 'submitted'
-          : status.kind === 'error'
-            ? 'error'
-            : hopQuotes.length === 2
-              ? 'ready'
-              : 'idle'
-
-  async function checkDelivery() {
-    if (!status.reference) return
-    setDeliveryState('checking')
-    try {
-      const result = await getDepositStatus({ depositTxnRef: status.reference })
-      setDelivery(result)
-      setDeliveryState('idle')
-    } catch {
-      setDeliveryState('error')
-    }
-  }
-
   return (
     <main id="top">
-      <Backdrop />
-      {/* Focused header: brand, minimal nav, status, single connect action */}
       <header className="site-header">
         <div className="site-header-inner">
           <a href="#top" className="wordmark" aria-label="Tempo Solana Swap home">
@@ -380,14 +300,7 @@ export default function App() {
               <i className="live-dot" aria-hidden />
               <span className="txt">{apiState === 'live' ? 'Live routes' : apiState === 'checking' ? 'Checking API…' : 'API degraded'}</span>
             </span>
-            <DynamicWidget
-              buttonClassName="dynamic-button"
-              innerButtonComponent={
-                <>
-                  <Wallet size={15} aria-hidden /> Connect
-                </>
-              }
-            />
+            <DynamicWidget buttonClassName="dynamic-button" />
           </div>
         </div>
       </header>
@@ -400,48 +313,18 @@ export default function App() {
             <h1>
               One deliberate route between <em>Tempo</em> and Solana.
             </h1>
-            <p className="hero-sub">
-              Move a supported stablecoin through a live Across route. Your wallet approves each step — this app never
-              holds keys or submits for you.
-            </p>
+            <p className="hero-sub">Live route. Your wallet approves each step.</p>
           </div>
           <aside className="scope-card" id="scope" aria-label="Release scope">
             <small>RELEASE SCOPE</small>
             <strong>
               pathUSD / USDC.e <b>↔</b> USDC
             </strong>
-            <span>Tempo 4217 · Solana mainnet · SOL is gas only</span>
+            <span>Tempo 4217 · Solana mainnet</span>
           </aside>
         </div>
       </section>
 
-      {/* Wallet status */}
-      <section className="shell wallets" aria-label="Connected wallets">
-        <WalletCard
-          chain="Tempo · 4217"
-          address={wallets.tempo?.address}
-          connected={Boolean(wallets.tempo)}
-          hint={wallets.tempo ? 'EVM wallet connected' : 'Connect an EVM wallet'}
-        />
-        <ArrowUpRight className="wallets-arrow" aria-hidden />
-        <WalletCard
-          chain="Solana · Mainnet"
-          address={wallets.solana?.address}
-          connected={Boolean(wallets.solana)}
-          hint={wallets.solana ? 'Solana wallet connected' : 'Connect a Solana wallet'}
-        />
-      </section>
-
-      <Balances
-        loading={balancesLoading}
-        balances={balances}
-        tempoAddress={wallets.tempo?.address}
-        solanaAddress={wallets.solana?.address}
-        onConnect={() => setShowAuthFlow(true)}
-        onRefresh={refreshBalances}
-      />
-
-      {/* Swap */}
       <section className="shell swap-section" id="swap" aria-label="Swap">
         <div className="swap-card">
           <div className="card-top">
@@ -450,11 +333,6 @@ export default function App() {
               <RefreshCw size={14} aria-hidden /> Reset
             </button>
           </div>
-          <p className="api-status" data-state={apiState} role="status" style={{ margin: '0 0 14px' }}>
-            <i className="live-dot" aria-hidden />
-            {apiState === 'live' ? 'Quote API live' : apiState === 'checking' ? 'Checking quote API…' : 'Quote API not configured — see README secrets'}
-          </p>
-
           <div className="chain-tabs" role="group" aria-label="Direction">
             <button type="button" aria-pressed={origin === 'tempo'} onClick={() => changeOrigin('tempo')}>
               From Tempo
@@ -464,6 +342,7 @@ export default function App() {
             </button>
           </div>
 
+          <p className="connection-note">{originWallet ? `Connected · ${compactAddress(originWallet.address)}` : 'Connect a wallet in the header to sign.'}</p>
           <label className="field-label" htmlFor="send-amount">
             You send
           </label>
@@ -489,18 +368,7 @@ export default function App() {
               label="Token you send"
             />
           </div>
-          <small className="field-hint">
-            {originWallet ? (
-              <>Sender: {compactAddress(originWallet.address)} · Balances load after connect.</>
-            ) : (
-              <span className="connect-row">
-                <span>No sending wallet.</span>
-                <button type="button" className="btn-ghost" onClick={() => setShowAuthFlow(true)}>
-                  Connect {origin === 'tempo' ? 'EVM' : 'Solana'} wallet <ArrowUpRight size={14} aria-hidden />
-                </button>
-              </span>
-            )}
-          </small>
+          <small className="field-hint">Quotes start automatically as you type.</small>
 
           <div className="flip-row">
             <span aria-hidden />
@@ -537,8 +405,8 @@ export default function App() {
                 : 'Request a quote to see what you receive. No wallet or balance needed.'}
           </small>
 
-          <label className="field-label" htmlFor="dest-address" style={{ marginTop: 16 }}>
-            Destination address ({destination === 'tempo' ? 'EVM' : 'Solana'})
+          <label className="field-label" htmlFor="dest-address" style={{ marginTop: 8 }}>
+            Destination address
           </label>
           <div className="amount dest-field">
             <input
@@ -558,23 +426,16 @@ export default function App() {
               <span className="dest-error">{manualError}</span>
             ) : destWallet?.address ? (
               manualRecipient ? (
-                <>Overriding connected wallet {compactAddress(destWallet.address)} · saved on this device after quoting.</>
+                <>Overriding connected wallet · saved on this device.</>
               ) : (
-                <>Using connected wallet {compactAddress(destWallet.address)} · or paste a different address below.</>
+                <>Using the connected wallet · or paste a different address.</>
               )
             ) : manualRecipient ? (
               <>Saved on this device after quoting.</>
             ) : (
-              <span className="connect-row">
-                <button type="button" className="btn-ghost" onClick={() => setShowAuthFlow(true)}>
-                  Connect {destination === 'tempo' ? 'EVM' : 'Solana'} wallet <ArrowUpRight size={14} aria-hidden />
-                </button>
-                <span>or paste an address — linking a second wallet keeps one session.</span>
-              </span>
+              <>Paste where the funds land — no second wallet needed.</>
             )}
           </small>
-
-          <RoutePath from={origin} to={destination} phase={routePhase} />
 
           <div aria-live="polite">
             {status.kind === 'error' && (
@@ -583,151 +444,74 @@ export default function App() {
                 <span>{status.message}</span>
               </p>
             )}
-            {status.kind === 'submitted' && (
-              <p className="notice success" role="status">
-                <Check size={16} aria-hidden />
-                <span>
-                  {status.message}{' '}
-                  {(status.references ?? (status.reference ? [status.reference] : [])).map((hash, index) => (
-                    <a
-                      key={hash}
-                      target="_blank"
-                      rel="noreferrer"
-                      href={explorerFor(hops?.[index]?.origin ?? origin, hash)}
-                    >
-                      Receipt {index + 1} <ExternalLink size={12} aria-hidden />{' '}
-                    </a>
-                  ))}
-                </span>
-              </p>
-            )}
-            {status.kind === 'submitted' && status.reference && (
-              <div className="deposit-track" aria-live="polite">
-                <strong>Delivery: {delivery?.status ? delivery.status : 'submitted — not yet checked'}</strong>
-                <span>
-                  {delivery?.fillTx || delivery?.fillTxnRef
-                    ? `Fill tx: ${compactAddress(delivery.fillTx ?? delivery.fillTxnRef)}`
-                    : 'Across fills typically land in seconds. Check delivery status to confirm the hop.'}
-                </span>
-                <span>
-                  <button type="button" className="btn-ghost" onClick={checkDelivery} disabled={deliveryState === 'checking'}>
-                    {deliveryState === 'checking' ? 'Checking delivery…' : 'Check delivery status'}
-                  </button>
-                  {deliveryState === 'error' && ' — status lookup failed. Retry in 15 seconds.'}
-                </span>
-              </div>
-            )}
           </div>
 
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!supported || !amount || busy || Boolean(manualError)}
-            onClick={() => getQuote()}
-          >
-            {busy && <LoaderCircle className="spin" size={16} aria-hidden />}
-            {primaryLabel}
-          </button>
-          {!canSign && (
-            <div className="link-wrap">
-              <small className="field-hint">
-                {!originConnected && !recipientAddress
-                  ? 'No sending wallet and no destination — you can still preview a quote.'
-                  : !originConnected
-                    ? `Connect your ${origin === 'tempo' ? 'EVM' : 'Solana'} sending wallet to sign — preview works now.`
-                    : 'Add a destination address to sign — preview works now.'}
-              </small>
-              {!originConnected && (
-                <button type="button" className="link-button" onClick={() => setShowAuthFlow(true)}>
-                  Connect sending wallet <ArrowUpRight size={14} aria-hidden />
+          {status.kind === 'submitted' ? (
+            <button type="button" className="btn-primary" onClick={reset} style={{ marginTop: 12 }}>
+              Start a new swap
+            </button>
+          ) : hopQuotes.length === 2 && status.kind === 'ready' ? (
+            <div className="review-inline quote-reveal" aria-label="Review route">
+              <h3>{quoteLive ? 'READY TO SIGN' : 'QUOTE'}</h3>
+              <p className="review-total">
+                {formatAmount(amount)} {input.symbol} <ArrowUpRight size={15} aria-hidden />{' '}
+                {receive ? formatAmount(receive) : '—'} {output.symbol}
+              </p>
+              <Row label="To" value={compactAddress(hopMetas[1]?.recipient)} />
+              <Row label="Route" value={`${input.symbol} → ${output.symbol}`} />
+              <Row label="Fee" value={hopQuotes[0]?.totalRelayFee?.total ? `${formatAmount(fromAtomicAmount(hopQuotes[0].totalRelayFee.total, input.decimals))} ${input.symbol}` : 'Included in quote'} />
+              <Row label="Delivery" value={deliverySeconds ? `~${deliverySeconds} seconds` : 'A few seconds'} />
+              {quoteLive ? (
+                <button type="button" className="btn-primary" onClick={submit} style={{ marginTop: 12 }}>
+                  Sign in wallet
                 </button>
+              ) : (
+                <p className="notice"><CircleAlert size={16} aria-hidden /><span>Connect your wallet in the header to sign.</span></p>
               )}
             </div>
-          )}
-          {canSign && hopQuotes.length === 2 && !quoteLive && (
-            <div className="link-wrap">
-              <small className="field-hint">Details changed — refresh for an executable live route.</small>
-            </div>
+          ) : (
+            status.kind === 'error' && <button type="button" className="btn-primary" disabled={busy} onClick={() => getQuote()}>{busy && <LoaderCircle className="spin" size={16} aria-hidden />}Try again</button>
           )}
           {!supported && (
             <small className="field-hint">This pair is not supported. SOL is gas only and cannot be bridged.</small>
           )}
         </div>
 
-        <aside className="details" aria-label="Route details">
-          <h2>
-            ROUTE DETAILS <ShieldCheck size={16} aria-hidden />
-          </h2>
-          <Row label="Route" value={supported && hops ? `${hops[0].input.symbol} → ${hops[1].output.symbol}` : 'Unavailable'} />
-          <Row label="Provider" value="Across" />
-          <FeeBreakdown fees={feeDataLive} deliverySeconds={deliverySeconds} />
-          <div className="details-note">
-            <b>Before you sign</b>
-            <p>Check the amount, recipient, route and fee in your wallet. Fresh quotes are required if they expire.</p>
-          </div>
-        </aside>
       </section>
 
       <section id="how" className="shell process" aria-label="How it works">
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
-          <Step n="01" t="Connect" d="Connect your sending wallet once — EVM or Solana." />
-          <Step n="02" t="Quote" d="Paste the destination; routes price instantly." />
-          <Step n="03" t="Sign" d="Approve hop 1 to Base, then hop 2 onward — two signatures." />
-          <Step n="04" t="Receive" d="Track both hops through to final delivery." />
+          <Step n="01" t="Connect once" d="Use the single header action to connect wallets." />
+          <Step n="02" t="Quote" d="Type an amount — pricing is automatic." />
+          <Step n="03" t="Sign" d="Approve the signatures your wallet shows." />
+          <Step n="04" t="Receive" d="Track delivery to the end." />
         </div>
       </section>
 
-      <Dialog.Root open={review} onOpenChange={setReview}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="backdrop">
-            <Dialog.Content
-              className="review-card"
-              aria-label="Review transaction"
-              onOpenAutoFocus={(e) => e.preventDefault()}
-            >
-              <div className="card-top">
-                <b>REVIEW TRANSACTION</b>
-                <Dialog.Close asChild>
-                  <button type="button" className="btn-ghost">
-                    Cancel
-                  </button>
-                </Dialog.Close>
-              </div>
-              <Dialog.Title asChild>
-                <h2>
-                  {formatAmount(amount)} {input.symbol} <ArrowUpRight size={17} aria-hidden />{' '}
-                  {receive ? formatAmount(receive) : '—'} {output.symbol}
-                </h2>
-              </Dialog.Title>
-              <Dialog.Description asChild>
-                <div>
-                  <Row label="Send from" value={compactAddress(hopMetas[0]?.depositor)} />
-                  <Row label="Receive at" value={compactAddress(hopMetas[1]?.recipient)} />
-                </div>
-              </Dialog.Description>
-              <FeeBreakdown fees={feeData} deliverySeconds={deliverySeconds} />
-              <p className="notice">
-                <CircleAlert size={16} aria-hidden />
-                <span>
-                  {quoteLive
-                    ? 'No transaction has been submitted. Two signatures follow — one per hop.'
-                    : 'Preview only — connect your sending wallet and add a destination address for an executable route.'}
-                </span>
-              </p>
-              {quoteLive ? (
-                <button type="button" className="btn-primary" onClick={submit}>
-                  Sign in wallet
-                </button>
-              ) : (
-                <button type="button" className="btn-primary" onClick={() => { setReview(false); setShowAuthFlow(true) }}>
-                  Connect sending wallet
-                </button>
-              )}
-            </Dialog.Content>
-          </Dialog.Overlay>
-        </Dialog.Portal>
-      </Dialog.Root>
+      {successOpen && status.kind === 'submitted' && (
+        <section className="success-dialog-backdrop" role="presentation">
+          <div className="success-dialog" role="dialog" aria-modal="true" aria-labelledby="success-title">
+            <button type="button" className="dialog-close" onClick={() => setSuccessOpen(false)} aria-label="Close success dialog">×</button>
+            <svg className="success-check" viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+              <circle cx="28" cy="28" r="26" />
+              <path d="M17 29 l8 8 l14 -16" />
+            </svg>
+            <p className="kicker">Transaction submitted</p>
+            <h2 id="success-title">On its way.</h2>
+            <p>{formatAmount(amount)} {input.symbol} → {receive ? formatAmount(receive) : '—'} {output.symbol}</p>
+            <span className="success-receipts">
+              {(status.references ?? (status.reference ? [status.reference] : [])).map((hash, index) => (
+                <a key={hash} target="_blank" rel="noreferrer" href={explorerFor(hops?.[index]?.origin ?? origin, hash)}>
+                  Receipt {index + 1} <ExternalLink size={12} aria-hidden />
+                </a>
+              ))}
+            </span>
+            <button type="button" className="btn-primary" onClick={() => { setSuccessOpen(false); reset() }}>Start a new swap</button>
+          </div>
+        </section>
+      )}
+
 
       <footer className="site-footer">
         <div className="site-footer-inner">
@@ -746,16 +530,6 @@ function explorerFor(network: Network, hash: string) {
   if (network === 'solana') return `https://solscan.io/tx/${hash}`
   if (network === 'base') return `https://basescan.org/tx/${hash}`
   return `https://explore.mainnet.tempo.xyz/tx/${hash}`
-}
-
-function WalletCard({ chain, address, connected, hint }: { chain: string; address?: string; connected: boolean; hint: string }) {
-  return (
-    <article className={`wallet-card ${connected ? 'is-on' : 'is-off'}`}>
-      <small>{chain}</small>
-      <strong>{address ? compactAddress(address) : 'Not connected'}</strong>
-      <span>{hint}</span>
-    </article>
-  )
 }
 
 function Row({ label, value }: { label: string; value: string }) {
