@@ -180,7 +180,7 @@ button:disabled { cursor: not-allowed; }
 .wallet-slot { display: grid; gap: 6px; min-width: 0; }
 .wallet-slot > small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
 .slot-chip, .slot-connect { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 10px; font-size: 11px; min-width: 0; }
-.slot-chip { background: var(--bg); }
+.slot-chip { background: var(--bg); cursor: pointer; text-align: left; }
 .slot-chip strong { font-size: 11px; }
 .slot-chip b { margin-left: auto; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 .slot-connect { background: var(--surface); color: var(--ink); font-weight: 700; justify-content: flex-start; cursor: pointer; }

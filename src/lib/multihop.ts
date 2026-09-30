@@ -40,6 +40,7 @@ export function hopParties(
   direction: Direction,
   senderAddress: string,
   finalAddress: string,
+  evmSignerAddress = finalAddress,
 ): [{ depositor: string; recipient: string }, { depositor: string; recipient: string }] {
   if (direction === 'tempo') {
     return [
@@ -48,7 +49,7 @@ export function hopParties(
     ]
   }
   return [
-    { depositor: senderAddress, recipient: finalAddress },
-    { depositor: finalAddress, recipient: finalAddress },
+    { depositor: senderAddress, recipient: evmSignerAddress },
+    { depositor: evmSignerAddress, recipient: finalAddress },
   ]
 }

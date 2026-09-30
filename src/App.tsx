@@ -154,6 +154,8 @@ export default function App() {
     setDestinationInput(loadSavedDestination(nextDestination))
     clearQuote()
     setStatus({ kind: 'idle' })
+    const nextWalletContext = next === 'tempo' ? tempoContext : solanaContext
+    if (nextWalletContext.wallet) void nextWalletContext.activate()
   }
 
   function flipDirection() {
@@ -186,7 +188,8 @@ export default function App() {
     // sides fall back to placeholders for a preview that can never be signed.
     const sender = originWallet?.address ?? previewAddressFor(origin)
     const final = recipientAddress ?? previewAddressFor(destination)
-    const [parties1, parties2] = hopParties(origin, sender, final)
+    const evmSigner = wallets.tempo?.address ?? previewAddressFor('base')
+    const [parties1, parties2] = hopParties(origin, sender, final, evmSigner)
     const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo))
     setStatus({ kind: 'loading', message: 'Finding your route…' })
     try {
@@ -249,7 +252,7 @@ export default function App() {
     void getQuote()
     // getQuote is intentionally excluded: the preview guard prevents loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originWallet?.address, recipientAddress])
+  }, [originWallet?.address, recipientAddress, wallets.tempo?.address])
 
   async function submit() {
     if (!hops || hopQuotes.length !== 2 || !originWallet || !quoteLive) return
@@ -561,7 +564,9 @@ function WalletSlot({ network, address, onConnect, label }: { network: Network; 
     <div className="wallet-slot">
       <small>{label}</small>
       {address ? (
-        <span className="slot-chip">{logo}<strong>{name}</strong><b>{compactAddress(address)}</b></span>
+        <button type="button" className="slot-chip" onClick={onConnect} aria-label={`Switch ${name} wallet`}>
+          {logo}<strong>{name}</strong><b>{compactAddress(address)}</b>
+        </button>
       ) : (
         <button type="button" className="slot-connect" onClick={onConnect} aria-label={`Connect ${name} wallet`}>
           {logo} Connect {name}

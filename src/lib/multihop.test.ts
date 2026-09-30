@@ -25,9 +25,9 @@ describe('multihop route planning', () => {
       { depositor: '0xEVM', recipient: '0xEVM' },
       { depositor: '0xEVM', recipient: 'Sol111' },
     ])
-    expect(hopParties('solana', 'Sol111', '0xEVM')).toEqual([
-      { depositor: 'Sol111', recipient: '0xEVM' },
-      { depositor: '0xEVM', recipient: '0xEVM' },
+    expect(hopParties('solana', 'Sol111', '0xFinal', '0xSigner')).toEqual([
+      { depositor: 'Sol111', recipient: '0xSigner' },
+      { depositor: '0xSigner', recipient: '0xFinal' },
     ])
   })
 
