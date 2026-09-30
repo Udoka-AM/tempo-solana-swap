@@ -1,4 +1,4 @@
-import { ASSETS, SOLANA_CHAIN_ID, TEMPO_CHAIN_ID, type AssetId, type Network, findAsset, isSupportedPair } from '../../shared/assets'
+import { ASSETS, BASE_CHAIN_ID, SOLANA_CHAIN_ID, TEMPO_CHAIN_ID, type AssetId, type Network, findAsset, isSupportedPair } from '../../shared/assets'
 
 export type Env = {
   ACROSS_API_KEY: string
@@ -25,7 +25,13 @@ const allowedQuoteFields = [
 ] as const
 
 const toNetwork = (chain: string | null): Network | undefined =>
-  chain === String(TEMPO_CHAIN_ID) ? 'tempo' : chain === String(SOLANA_CHAIN_ID) ? 'solana' : undefined
+  chain === String(TEMPO_CHAIN_ID)
+    ? 'tempo'
+    : chain === String(SOLANA_CHAIN_ID)
+      ? 'solana'
+      : chain === String(BASE_CHAIN_ID)
+        ? 'base'
+        : undefined
 
 export function json(body: unknown, status = 200, headers: HeadersInit = {}) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers } })

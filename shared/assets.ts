@@ -1,7 +1,8 @@
 export const TEMPO_CHAIN_ID = 4217
 export const SOLANA_CHAIN_ID = 34268394551451
+export const BASE_CHAIN_ID = 8453
 
-export type Network = 'tempo' | 'solana'
+export type Network = 'tempo' | 'solana' | 'base'
 export type AssetId = 'pathUSD' | 'USDC.e' | 'USDC' | 'SOL'
 
 export type Asset = {
@@ -20,8 +21,13 @@ export const ASSETS: readonly Asset[] = [
   { id: 'pathUSD', network: 'tempo', address: '0x20c0000000000000000000000000000000000000', decimals: 6, label: 'pathUSD', symbol: 'pathUSD', bridgeable: true },
   { id: 'USDC.e', network: 'tempo', address: '0x20C000000000000000000000b9537d11c60E8b50', decimals: 6, label: 'USDC.e', symbol: 'USDC.e', bridgeable: true },
   { id: 'USDC', network: 'solana', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, label: 'USD Coin', symbol: 'USDC', bridgeable: true },
+  { id: 'USDC', network: 'base', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6, label: 'USD Coin', symbol: 'USDC', bridgeable: true },
   { id: 'SOL', network: 'solana', address: 'So11111111111111111111111111111111111111112', decimals: 9, label: 'Solana', symbol: 'SOL', bridgeable: false },
 ] as const
+
+export function chainIdFor(network: Network) {
+  return network === 'tempo' ? TEMPO_CHAIN_ID : network === 'solana' ? SOLANA_CHAIN_ID : BASE_CHAIN_ID
+}
 
 export function assetsFor(network: Network) {
   return ASSETS.filter((asset) => asset.network === network)
@@ -33,6 +39,13 @@ export function findAsset(network: Network, id: AssetId) {
 
 export function isSupportedPair(originNetwork: Network, input: AssetId, destinationNetwork: Network, output: AssetId) {
   if (originNetwork === destinationNetwork || input === 'SOL' || output === 'SOL') return false
+  // Multihop corridor: Tempo stablecoin -> Base USDC (proxy) -> Solana USDC.
+  if (originNetwork === 'tempo' && destinationNetwork === 'base') {
+    return output === 'USDC' && (input === 'pathUSD' || input === 'USDC.e')
+  }
+  if (originNetwork === 'base' && destinationNetwork === 'solana') {
+    return input === 'USDC' && output === 'USDC'
+  }
   return originNetwork === 'tempo'
     ? destinationNetwork === 'solana' && output === 'USDC' && (input === 'pathUSD' || input === 'USDC.e')
     : destinationNetwork === 'tempo' && input === 'USDC' && (output === 'pathUSD' || output === 'USDC.e')

@@ -1,4 +1,5 @@
 import { VersionedTransaction } from '@solana/web3.js'
+import { BASE_CHAIN_ID, TEMPO_CHAIN_ID } from '../../shared/assets'
 import type { AcrossQuote, AcrossTransaction } from './quote'
 
 type EvmWallet = {
@@ -12,14 +13,16 @@ type SolanaWallet = {
 
 export type ExecutionUpdate = (stage: 'switching' | 'approving' | 'submitting' | 'submitted', reference?: string) => void
 
+export const EVM_PROXY_CHAIN_ID = BASE_CHAIN_ID
+
 function requireEvmTx(tx: AcrossTransaction | undefined) {
   if (!tx?.to || !tx.data) throw new Error('Across did not return a compatible EVM transaction. Refresh the quote.')
   return tx
 }
 
-export async function executeEvmQuote(wallet: EvmWallet, quote: AcrossQuote, onUpdate: ExecutionUpdate) {
+export async function executeEvmQuote(wallet: EvmWallet, quote: AcrossQuote, onUpdate: ExecutionUpdate, chainId: number = TEMPO_CHAIN_ID) {
   onUpdate('switching')
-  await wallet.switchNetwork(4217)
+  await wallet.switchNetwork(chainId)
   const signer = await wallet.connector.getSigner?.()
   if (!signer) throw new Error('The selected wallet cannot sign an EVM transaction.')
   for (const approval of quote.approvalTxns ?? []) {

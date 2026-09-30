@@ -25,6 +25,7 @@ import {
   type DepositStatus,
 } from './lib/quote'
 import type { RoutePhase } from './lib/route-viz'
+import type { Direction } from './lib/multihop'
 import { pickWallets, walletNetwork } from './lib/wallets'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
 import { loadBalances, type BalanceState } from './lib/balances'
@@ -78,7 +79,7 @@ function AssetPicker({
 export default function App() {
   const { primaryWallet, setShowAuthFlow } = useDynamicContext()
   const userWallets = useUserWallets()
-  const [origin, setOrigin] = useState<Network>('tempo')
+  const [origin, setOrigin] = useState<Direction>('tempo')
   const [inputId, setInputId] = useState<AssetId>('pathUSD')
   const [outputId, setOutputId] = useState<AssetId>('USDC')
   const [amount, setAmount] = useState('')
@@ -106,7 +107,7 @@ export default function App() {
     }
   }, [])
 
-  const destination: Network = origin === 'tempo' ? 'solana' : 'tempo'
+  const destination: Direction = origin === 'tempo' ? 'solana' : 'tempo'
   const input = findAsset(origin, inputId)!
   const output = findAsset(destination, outputId)!
 
@@ -134,7 +135,7 @@ export default function App() {
     setQuoteMeta(undefined)
   }
 
-  function changeOrigin(next: Network) {
+  function changeOrigin(next: Direction) {
     const nextDestination: Network = next === 'tempo' ? 'solana' : 'tempo'
     setOrigin(next)
     setInputId(next === 'tempo' ? 'pathUSD' : 'USDC')

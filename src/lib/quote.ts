@@ -1,4 +1,4 @@
-import { SOLANA_CHAIN_ID, TEMPO_CHAIN_ID, type Asset, type Network } from '../../shared/assets'
+import { chainIdFor, type Asset, type Network } from '../../shared/assets'
 import { toAtomicAmount } from './format'
 
 export type AcrossTransaction = {
@@ -41,7 +41,7 @@ export const PREVIEW_EVM_ADDRESS = '0x000000000000000000000000000000000000dEaD'
 export const PREVIEW_SOLANA_ADDRESS = '11111111111111111111111111111111'
 
 export function previewAddressFor(network: Network) {
-  return network === 'tempo' ? PREVIEW_EVM_ADDRESS : PREVIEW_SOLANA_ADDRESS
+  return network === 'solana' ? PREVIEW_SOLANA_ADDRESS : PREVIEW_EVM_ADDRESS
 }
 
 export function isPreviewAddress(address: string | undefined) {
@@ -106,8 +106,8 @@ export async function requestQuote(input: QuoteInput) {
     amount: atomic.toString(),
     inputToken: input.input.address,
     outputToken: input.output.address,
-    originChainId: String(input.origin === 'tempo' ? TEMPO_CHAIN_ID : SOLANA_CHAIN_ID),
-    destinationChainId: String(input.destination === 'tempo' ? TEMPO_CHAIN_ID : SOLANA_CHAIN_ID),
+    originChainId: String(chainIdFor(input.origin)),
+    destinationChainId: String(chainIdFor(input.destination)),
     depositor: input.depositor,
     recipient: input.recipient,
     refundAddress: input.depositor,

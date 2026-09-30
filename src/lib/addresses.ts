@@ -14,10 +14,10 @@ export function isSolanaAddress(value: string) {
 export function validateAddressFor(network: Network, value: string): string | undefined {
   const trimmed = value.trim()
   if (!trimmed) return 'Enter a destination address.'
-  if (network === 'tempo') {
-    return isEvmAddress(trimmed) ? undefined : 'Enter a valid EVM address (0x followed by 40 hex characters).'
+  if (network === 'solana') {
+    return isSolanaAddress(trimmed) ? undefined : 'Enter a valid Solana address (base58, usually 44 characters).'
   }
-  return isSolanaAddress(trimmed) ? undefined : 'Enter a valid Solana address (base58, usually 44 characters).'
+  return isEvmAddress(trimmed) ? undefined : 'Enter a valid EVM address (0x followed by 40 hex characters).'
 }
 
 const STORAGE_PREFIX = 'tempo-swap:dest:'
