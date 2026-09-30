@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,6 +29,7 @@ jobs:
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
       - run: npm run build
       - name: Deploy Pages Functions and site
@@ -45,3 +47,15 @@ jobs:
         run: |
           printf '%s' "$ACROSS_API_KEY" | npx wrangler pages secret put ACROSS_API_KEY --project-name tempo-solana-swap
           printf '%s' "$ACROSS_INTEGRATOR_ID" | npx wrangler pages secret put ACROSS_INTEGRATOR_ID --project-name tempo-solana-swap
+      - name: Post-deploy quote API QA (production)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          for i in 1 2 3 4 5 6; do
+            HEALTH=$(curl -sS https://tempo-solana-swap.pages.dev/api/health || true)
+            echo "$HEALTH"
+            echo "$HEALTH" | grep -q '"ok":true' && break
+            sleep 20
+          done
+          echo "$HEALTH" | grep -q '"ok":true'
+          TOKENS=$(curl -sS https://tempo-solana-swap.pages.dev/api/tokens || true)
+          echo "$TOKENS" | grep -q 'pathUSD'

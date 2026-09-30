@@ -31,6 +31,13 @@ The GitHub workflow needs these repository secrets:
 
 The production workflow deploys `main`, then writes the two Across values as Pages Function secrets. Pull requests receive preview deployments but never receive production quote credentials.
 
+## Quote API and bridging verification
+
+- `GET /api/health` reports `{ ok, across: 'configured' | 'missing' }`. The header badge and swap card read this on load; `degraded` means the Across secrets are missing on that deployment.
+- `GET /api/quote` is the only browser path to Across `/swap/approval`. It enforces the stablecoin allowlist, injects the server-side `integratorId`, times out after 12s, and truncates upstream error detail.
+- `GET /api/deposit-status?depositTxnRef=<hash>` (or `originChainId` + `depositId`) proxies Across `/deposit/status`. After submitting, use **Check delivery status** in the success panel to confirm the hop moved `pending` → `filled`.
+- Post-deploy QA runs automatically on `main`: the workflow curls `/api/health` (`ok:true`) and `/api/tokens` (`pathUSD` present).
+
 ## Checks
 
 ```bash

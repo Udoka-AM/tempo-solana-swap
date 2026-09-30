@@ -7,6 +7,17 @@ export type Env = {
 }
 
 const ACROSS_API = 'https://app.across.to/api'
+const UPSTREAM_TIMEOUT_MS = 12_000
+const MAX_UPSTREAM_DETAIL = 500
+
+function summarizeUpstream(body: unknown, status: number) {
+  try {
+    const text = typeof body === 'string' ? body : JSON.stringify(body)
+    return `upstream_${status}:${text.slice(0, MAX_UPSTREAM_DETAIL)}`
+  } catch {
+    return `upstream_${status}`
+  }
+}
 const allowedQuoteFields = [
   'tradeType', 'amount', 'inputToken', 'outputToken', 'originChainId', 'destinationChainId',
   'depositor', 'recipient', 'refundAddress', 'refundOnOrigin', 'slippage', 'strictTradeType',
@@ -62,12 +73,63 @@ export function makeAcrossQuery(params: URLSearchParams, integratorId: string) {
 }
 
 export async function fetchAcrossQuote(params: URLSearchParams, env: Env, fetcher: typeof fetch = fetch) {
-  const response = await fetcher(`${ACROSS_API}/swap/approval?${makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID)}`, {
-    headers: { authorization: `Bearer ${env.ACROSS_API_KEY}` },
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetcher(`${ACROSS_API}/swap/approval?${makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID)}`, {
+      headers: { authorization: `Bearer ${env.ACROSS_API_KEY}`, 'user-agent': 'tempo-solana-swap/1.0' },
+      signal: controller.signal,
+    })
+  } catch (error) {
+    return apiError('quote_upstream_unavailable', 502, error instanceof Error ? error.name : 'fetch_failed')
+  } finally {
+    clearTimeout(timeout)
+  }
   let body: unknown
   try { body = await response.json() } catch { body = { error: 'invalid_upstream_response' } }
-  if (!response.ok) return apiError('quote_unavailable', response.status === 429 ? 429 : 502, typeof body === 'object' && body ? JSON.stringify(body) : undefined)
+  if (!response.ok)
+    return apiError(
+      'quote_unavailable',
+      response.status === 429 ? 429 : 502,
+      summarizeUpstream(body, response.status),
+    )
+  return json(body)
+}
+
+const allowedDepositStatusFields = ['originChainId', 'depositId', 'depositTxnRef'] as const
+
+export function validateDepositStatus(request: Request): { error: Response; params?: never } | { params: URLSearchParams; error?: never } {
+  const params = new URL(request.url).searchParams
+  const filtered = new URLSearchParams()
+  for (const key of allowedDepositStatusFields) {
+    const value = params.get(key)
+    if (value) filtered.set(key, value)
+  }
+  // Across accepts either depositTxnRef alone, or originChainId + depositId together.
+  const byHash = Boolean(filtered.get('depositTxnRef'))
+  const byId = Boolean(filtered.get('originChainId') && filtered.get('depositId'))
+  if (!byHash && !byId) return { error: apiError('missing_parameter', 400, 'depositTxnRef or originChainId+depositId') } as const
+  return { params: filtered } as const
+}
+
+export async function fetchDepositStatus(params: URLSearchParams, env: Env, fetcher: typeof fetch = fetch) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetcher(`${ACROSS_API}/deposit/status?${params}`, {
+      headers: { authorization: `Bearer ${env.ACROSS_API_KEY}`, 'user-agent': 'tempo-solana-swap/1.0' },
+      signal: controller.signal,
+    })
+  } catch (error) {
+    return apiError('deposit_status_unavailable', 502, error instanceof Error ? error.name : 'fetch_failed')
+  } finally {
+    clearTimeout(timeout)
+  }
+  let body: unknown
+  try { body = await response.json() } catch { body = { error: 'invalid_upstream_response' } }
+  if (!response.ok) return apiError('deposit_status_unavailable', 502, summarizeUpstream(body, response.status))
   return json(body)
 }
 
