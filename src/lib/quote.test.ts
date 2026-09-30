@@ -25,6 +25,13 @@ describe('quote error messages', () => {
   it('rejects unsupported pairs plainly', () => {
     expect(quoteErrorMessage({ error: 'unsupported_pair' }, 400)).toMatch(/No live route/)
   })
+
+  it('extracts the Across message from upstream detail', () => {
+    const detail = 'upstream_400:{"type":"AcrossApiError","message":"Destination swaps are not supported yet."}'
+    expect(quoteErrorMessage({ error: 'quote_unavailable', detail }, 502)).toBe(
+      'Across: Destination swaps are not supported yet.',
+    )
+  })
 })
 
 describe('preview addresses', () => {

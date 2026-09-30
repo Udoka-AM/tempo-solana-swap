@@ -37,6 +37,11 @@ The production workflow deploys `main`, then writes the two Across values as Pag
 - `GET /api/quote` is the only browser path to Across `/swap/approval`. It enforces the stablecoin allowlist, injects the server-side `integratorId`, times out after 12s, and truncates upstream error detail.
 - `GET /api/deposit-status?depositTxnRef=<hash>` (or `originChainId` + `depositId`) proxies Across `/deposit/status`. After submitting, use **Check delivery status** in the success panel to confirm the hop moved `pending` → `filled`.
 - Post-deploy QA runs automatically on `main`: the workflow curls `/api/health` (`ok:true`) and `/api/tokens` (`pathUSD` present).
+- `GET /api/across-meta?resource=chains|tokens` proxies Across swap metadata (no key exposure). Used to confirm chain 4217 + Solana support and exact token addresses.
+
+## Known upstream limitation (2026-09-30)
+
+Across `/swap/approval` rejects every Tempo ↔ Solana pair with `INVALID_PARAM: "Destination swaps are not supported yet for routes involving Solana."` Verified live for pathUSD/USDC.e ↔ USDC in both directions, with full and minimal parameters. Our pairs require a swap leg (different input/output assets), so no quote can render until Across ships Solana swap support. The UI surfaces the upstream message verbatim (`Across: …`) instead of a generic error.
 
 ## Checks
 

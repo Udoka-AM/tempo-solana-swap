@@ -440,7 +440,7 @@ export default function App() {
                       rel="noreferrer"
                       href={
                         origin === 'tempo'
-                          ? `https://explore.tempo.xyz/tx/${status.reference}`
+                          ? `https://explore.mainnet.tempo.xyz/tx/${status.reference}`
                           : `https://solscan.io/tx/${status.reference}`
                       }
                     >

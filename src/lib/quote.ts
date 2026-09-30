@@ -60,6 +60,19 @@ export function normalizeQuote(body: AcrossQuote): AcrossQuote {
   return body
 }
 
+export function extractUpstreamMessage(detail: string | undefined): string | undefined {
+  if (!detail) return undefined
+  const marker = 'upstream_'
+  const start = detail.indexOf('{', detail.indexOf(marker))
+  if (start === -1) return detail.slice(0, 200)
+  try {
+    const parsed = JSON.parse(detail.slice(start)) as { message?: string }
+    return typeof parsed.message === 'string' ? parsed.message : detail.slice(0, 200)
+  } catch {
+    return detail.slice(0, 200)
+  }
+}
+
 export function quoteErrorMessage(body: QuoteErrorBody, status: number): string {
   switch (body.error) {
     case 'service_not_configured':
@@ -71,10 +84,12 @@ export function quoteErrorMessage(body: QuoteErrorBody, status: number): string 
     case 'missing_parameter':
     case 'invalid_amount':
       return 'Enter an amount greater than zero.'
-    case 'quote_unavailable':
+    case 'quote_unavailable': {
       if (status === 429) return 'Across is rate-limiting quotes. Wait a few seconds and try again.'
-      if (body.detail) return `Across quote failed (${body.detail.slice(0, 160)}).`
+      const upstream = extractUpstreamMessage(body.detail)
+      if (upstream) return `Across: ${upstream}`
       return 'Across did not return a quote for this amount. Try a smaller amount.'
+    }
     case 'quote_upstream_unavailable':
       return 'Could not reach Across. Check your connection and try again.'
     default:

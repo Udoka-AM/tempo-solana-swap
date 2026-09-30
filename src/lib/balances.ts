@@ -3,7 +3,10 @@ import { createPublicClient, erc20Abi, formatUnits, http } from 'viem'
 import { ASSETS } from '../../shared/assets'
 
 export const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com'
-export const TEMPO_RPC_URL = import.meta.env.VITE_TEMPO_RPC_URL as string | undefined
+// Public Tempo RPC confirmed via Across /swap/chains metadata
+// (publicRpcUrl for chain 4217). Overridable with VITE_TEMPO_RPC_URL.
+export const TEMPO_RPC_URL =
+  (import.meta.env.VITE_TEMPO_RPC_URL as string | undefined) || 'https://rpc.tempo.xyz'
 
 export function solanaUsdcMint() {
   return ASSETS.find((asset) => asset.network === 'solana' && asset.id === 'USDC')!.address
@@ -59,10 +62,6 @@ export async function loadBalances(addresses: { tempo?: string; solana?: string 
   for (const token of tempoTokens()) {
     if (!tempoOwner) {
       rows.push({ assetId: token.id, network: 'tempo', symbol: token.symbol })
-      continue
-    }
-    if (!TEMPO_RPC_URL) {
-      rows.push({ assetId: token.id, network: 'tempo', symbol: token.symbol, unavailable: 'Set VITE_TEMPO_RPC_URL to load Tempo balances.' })
       continue
     }
     try {
