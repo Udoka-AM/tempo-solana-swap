@@ -17,7 +17,7 @@ import {
   requestQuote,
   type AcrossQuote,
 } from './lib/quote'
-import type { RoutePhase } from './lib/route-viz'
+import { corridorLabel, type RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
@@ -336,7 +336,7 @@ export default function App() {
             <strong>
               pathUSD / USDC.e <b>↔</b> USDC
             </strong>
-            <span>Tempo 4217 · Solana mainnet</span>
+            <span>Tempo 4217 · Base 8453 · Solana mainnet</span>
           </aside>
         </div>
       </section>
@@ -480,7 +480,7 @@ export default function App() {
                 {receive ? formatAmount(receive) : '—'} {output.symbol}
               </p>
               <Row label="To" value={compactAddress(hopMetas[1]?.recipient)} />
-              <Row label="Route" value={`${input.symbol} → ${output.symbol}`} />
+              <Row label="Route" value={corridorLabel(origin === 'tempo' ? 'Tempo' : 'Solana', destination === 'tempo' ? 'Tempo' : 'Solana')} />
               <Row label="Fee" value={hopQuotes[0]?.totalRelayFee?.total ? `${formatAmount(fromAtomicAmount(hopQuotes[0].totalRelayFee.total, input.decimals))} ${input.symbol}` : 'Included in quote'} />
               <Row label="Delivery" value={deliverySeconds ? `~${deliverySeconds} seconds` : 'A few seconds'} />
               {quoteLive ? (

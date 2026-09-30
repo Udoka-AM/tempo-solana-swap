@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SOLANA_CHAIN_ID, TEMPO_CHAIN_ID } from '../../shared/assets'
+import { BASE_CHAIN_ID, SOLANA_CHAIN_ID, TEMPO_CHAIN_ID } from '../../shared/assets'
 import {
   fetchAcrossMeta,
   fetchAcrossQuote,
@@ -11,14 +11,16 @@ import {
 } from './_lib'
 
 const env: Env = { ACROSS_API_KEY: 'server-secret', ACROSS_INTEGRATOR_ID: 'integrator-live-id' }
-const validPath = `/api/quote?amount=1000000&inputToken=0x20c0000000000000000000000000000000000000&outputToken=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&originChainId=${TEMPO_CHAIN_ID}&destinationChainId=${SOLANA_CHAIN_ID}&depositor=0xabc&recipient=4Nd1mN1mN1mN1mN1mN1mN1mN1mN1mN1mN1mN1mN1m`
+const validPath = `/api/quote?amount=1000000&inputToken=0x20c0000000000000000000000000000000000000&outputToken=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&originChainId=${TEMPO_CHAIN_ID}&destinationChainId=${BASE_CHAIN_ID}&depositor=0xabc&recipient=0xdef`
 
 describe('same-origin Across quote proxy', () => {
   it('accepts only the stablecoin release pairs', () => {
     const valid = validateQuote(new Request(`https://swap.example${validPath}`))
     expect('params' in valid).toBe(true)
-    const unsupported = validateQuote(new Request(`https://swap.example${validPath.replace('outputToken=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'outputToken=So11111111111111111111111111111111111111112')}`))
+    const unsupported = validateQuote(new Request(`https://swap.example${validPath.replace('outputToken=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'outputToken=So11111111111111111111111111111111111111112')}`))
     expect('error' in unsupported).toBe(true)
+    const direct = validateQuote(new Request(`https://swap.example${validPath.replace('outputToken=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'outputToken=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v').replace(`destinationChainId=${BASE_CHAIN_ID}`, `destinationChainId=${SOLANA_CHAIN_ID}`)}`))
+    expect('error' in direct).toBe(true)
   })
 
   it('injects the server-side integrator ID and discards a caller value', async () => {

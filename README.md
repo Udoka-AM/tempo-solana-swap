@@ -1,12 +1,12 @@
 # Tempo × Solana Swap
 
-Non-custodial, stablecoin-only routes between Tempo (chain `4217`) and Solana mainnet. The browser calls same-origin Cloudflare Pages Functions, which validate the pair and obtain short-lived Across quotes without exposing the Across API credentials.
+Non-custodial, stablecoin-only routes between Tempo (chain `4217`) and Solana mainnet. The browser composes two Across legs through Base (`8453`) because Across does not support a direct Tempo ↔ Solana route. Same-origin Cloudflare Pages Functions validate each leg and obtain short-lived quotes without exposing the Across API credentials.
 
 ## Supported release scope
 
 - Tempo: `pathUSD`, `USDC.e`
 - Solana: native USDC. SOL is displayed as gas-only.
-- Directions: Tempo stablecoin → Solana USDC; Solana USDC → Tempo stablecoin.
+- Directions: Tempo stablecoin → Base USDC → Solana USDC; Solana USDC → Base USDC → Tempo stablecoin.
 - Unsupported or unavailable Across pairs are rejected rather than quoted synthetically.
 
 ## Local run
@@ -39,9 +39,9 @@ The production workflow deploys `main`, then writes the two Across values as Pag
 - Post-deploy QA runs automatically on `main`: the workflow curls `/api/health` (`ok:true`) and `/api/tokens` (`pathUSD` present).
 - `GET /api/across-meta?resource=chains|tokens` proxies Across swap metadata (no key exposure). Used to confirm chain 4217 + Solana support and exact token addresses.
 
-## Known upstream limitation (2026-09-30)
+## Route architecture
 
-Across `/swap/approval` rejects every Tempo ↔ Solana pair with `INVALID_PARAM: "Destination swaps are not supported yet for routes involving Solana."` Verified live for pathUSD/USDC.e ↔ USDC in both directions, with full and minimal parameters. Our pairs require a swap leg (different input/output assets), so no quote can render until Across ships Solana swap support. The UI surfaces the upstream message verbatim (`Across: …`) instead of a generic error.
+The app never requests a direct Tempo ↔ Solana quote. Each swap is quoted as two independent Across legs: Tempo ↔ Base USDC, then Base USDC ↔ Solana USDC. The UI keeps the two legs separate so each required wallet signs on its own network, while the user sees one simple route.
 
 ## Checks
 

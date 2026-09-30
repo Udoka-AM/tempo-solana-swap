@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isSupportedPair } from '../../shared/assets'
 import { hopParties, planHops } from './multihop'
 
 describe('multihop route planning', () => {
@@ -28,5 +29,14 @@ describe('multihop route planning', () => {
       { depositor: 'Sol111', recipient: '0xEVM' },
       { depositor: '0xEVM', recipient: '0xEVM' },
     ])
+  })
+
+  it('never treats Tempo and Solana as a direct Across pair', () => {
+    expect(isSupportedPair('tempo', 'pathUSD', 'solana', 'USDC')).toBe(false)
+    expect(isSupportedPair('solana', 'USDC', 'tempo', 'USDC.e')).toBe(false)
+    expect(isSupportedPair('tempo', 'pathUSD', 'base', 'USDC')).toBe(true)
+    expect(isSupportedPair('base', 'USDC', 'solana', 'USDC')).toBe(true)
+    expect(isSupportedPair('solana', 'USDC', 'base', 'USDC')).toBe(true)
+    expect(isSupportedPair('base', 'USDC', 'tempo', 'USDC.e')).toBe(true)
   })
 })

@@ -1,19 +1,23 @@
 export type RoutePhase = 'idle' | 'loading' | 'ready' | 'submitting' | 'submitted' | 'error'
 
+export function corridorLabel(origin: string, destination: string) {
+  return `${origin} → Base → ${destination}`
+}
+
 export function phaseLabel(phase: RoutePhase, origin: string, destination: string) {
   switch (phase) {
     case 'loading':
-      return `Fetching live Across quote from ${origin} to ${destination}`
+      return `Fetching live Across quotes for ${corridorLabel(origin, destination)}`
     case 'ready':
-      return `Live route ready from ${origin} to ${destination} via Across`
+      return `Live route ready on ${corridorLabel(origin, destination)} via Across`
     case 'submitting':
       return `Waiting for wallet signature on ${origin}`
     case 'submitted':
-      return `Deposit submitted on ${origin}, Across is delivering to ${destination}`
+      return `Deposits submitted on ${origin} and Base, Across is delivering to ${destination}`
     case 'error':
-      return `Route unavailable from ${origin} to ${destination}`
+      return `Route unavailable on ${corridorLabel(origin, destination)}`
     default:
-      return `Route from ${origin} to ${destination} via Across`
+      return `Route on ${corridorLabel(origin, destination)} via Across`
   }
 }
 

@@ -46,7 +46,13 @@ export function isSupportedPair(originNetwork: Network, input: AssetId, destinat
   if (originNetwork === 'base' && destinationNetwork === 'solana') {
     return input === 'USDC' && output === 'USDC'
   }
-  return originNetwork === 'tempo'
-    ? destinationNetwork === 'solana' && output === 'USDC' && (input === 'pathUSD' || input === 'USDC.e')
-    : destinationNetwork === 'tempo' && input === 'USDC' && (output === 'pathUSD' || output === 'USDC.e')
+  if (originNetwork === 'solana' && destinationNetwork === 'base') {
+    return input === 'USDC' && output === 'USDC'
+  }
+  if (originNetwork === 'base' && destinationNetwork === 'tempo') {
+    return input === 'USDC' && (output === 'pathUSD' || output === 'USDC.e')
+  }
+  // Tempo <-> Solana is intentionally never sent to Across directly. The
+  // application composes the two supported legs above through Base.
+  return false
 }
