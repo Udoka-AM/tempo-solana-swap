@@ -18,11 +18,13 @@ import {
   requestQuote,
   type AcrossQuote,
 } from './lib/quote'
+import type { RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
 import { pickWallets, walletNetwork } from './lib/wallets'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
 import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
+import RoutePath from './components/RoutePath'
 
 const TokenUSDC = tokenIcons.TokenUSDC
 const TokenSOL = tokenIcons.TokenSOL
@@ -129,6 +131,18 @@ export default function App() {
       ? (hopQuotes[0]?.expectedFillTime ?? 0) + (hopQuotes[1]?.expectedFillTime ?? 0)
       : undefined
   const busy = status.kind === 'loading' || status.kind === 'submitting'
+  const routePhase: RoutePhase =
+    status.kind === 'loading'
+      ? 'loading'
+      : status.kind === 'submitting'
+        ? 'submitting'
+        : status.kind === 'submitted'
+          ? 'submitted'
+          : status.kind === 'error'
+            ? 'error'
+            : hopQuotes.length === 2
+              ? 'ready'
+              : 'idle'
 
   function clearQuote() {
     setHopQuotes([])
@@ -377,7 +391,7 @@ export default function App() {
               label="Token you send"
             />
           </div>
-          <small className="field-hint">Quotes start automatically as you type.</small>
+          <small className="field-hint">Enter an amount to preview the route automatically.</small>
 
           <div className="flip-row">
             <span aria-hidden />
@@ -411,7 +425,7 @@ export default function App() {
                 ? quoteLive
                   ? 'Expected output across the full route.'
                   : 'Preview price across the full route — connect your sending wallet and add a destination to sign.'
-                : 'Request a quote to see what you receive. No wallet or balance needed.'}
+                : 'Live quote updates as you type.'}
           </small>
 
           <label className="field-label" htmlFor="dest-address" style={{ marginTop: 8 }}>
@@ -442,9 +456,11 @@ export default function App() {
             ) : manualRecipient ? (
               <>Saved on this device after quoting.</>
             ) : (
-              <>Paste where the funds land — no second wallet needed.</>
+              <>Connect the To wallet above, or paste a destination instead.</>
             )}
           </small>
+
+          <RoutePath from={origin} to={destination} phase={routePhase} />
 
           <div aria-live="polite">
             {status.kind === 'error' && (
@@ -475,7 +491,7 @@ export default function App() {
                   Sign in wallet
                 </button>
               ) : (
-                <p className="notice"><CircleAlert size={16} aria-hidden /><span>Connect your wallet in the header to sign.</span></p>
+                <p className="notice"><CircleAlert size={16} aria-hidden /><span>Connect the required signing wallets above to sign.</span></p>
               )}
             </div>
           ) : (
@@ -491,7 +507,7 @@ export default function App() {
       <section id="how" className="shell process" aria-label="How it works">
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
-          <Step n="01" t="Connect once" d="Use the single header action to connect wallets." />
+          <Step n="01" t="Connect" d="Choose a From and To wallet above." />
           <Step n="02" t="Quote" d="Type an amount — pricing is automatic." />
           <Step n="03" t="Sign" d="Approve the signatures your wallet shows." />
           <Step n="04" t="Receive" d="Track delivery to the end." />
