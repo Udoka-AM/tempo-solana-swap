@@ -5,8 +5,11 @@ export type DynamicWallet = NonNullable<ReturnType<typeof useDynamicContext>['pr
 
 export type WalletContextValue = {
   wallet: DynamicWallet | null
+  wallets: DynamicWallet[]
   connect: () => void
   activate: () => Promise<void>
+  select: (walletId: string) => Promise<void>
+  disconnect: (walletId: string) => Promise<void>
 }
 
 export const TempoWalletContext = createContext<WalletContextValue | null>(null)

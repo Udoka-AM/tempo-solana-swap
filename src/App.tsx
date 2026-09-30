@@ -12,7 +12,6 @@ import { assetsFor, chainIdFor, findAsset, isSupportedPair, type Asset, type Ass
 import { compactAddress, formatAmount, fromAtomicAmount, sanitizeAmount } from './lib/format'
 import {
   getHealth,
-  isPreviewAddress,
   previewAddressFor,
   requestQuote,
   type AcrossQuote,
@@ -24,7 +23,7 @@ import { loadSavedDestination, saveDestination, validateAddressFor } from './lib
 import { executeEvmQuote, executeSolanaQuote, initializeSolanaUsdcAta, type ExecutionUpdate } from './lib/transactions'
 import { hasSolanaUsdcAta } from './lib/solana-account'
 import RoutePath from './components/RoutePath'
-import { useSolanaWallet, useTempoWallet } from './components/wallet-context'
+import { type DynamicWallet, useSolanaWallet, useTempoWallet } from './components/wallet-context'
 
 const TokenUSDC = tokenIcons.TokenUSDC
 const TokenSOL = tokenIcons.TokenSOL
@@ -135,6 +134,17 @@ export default function App() {
 
   const canPrepareSolanaRecipient =
     destination !== 'solana' || solanaAtaState === 'ready' || (solanaAtaState === 'missing' && recipientSolanaWallet)
+  const signingHint = !originWallet
+    ? `Connect your ${origin === 'tempo' ? 'Tempo' : 'Solana'} wallet to sign.`
+    : !recipientAddress
+      ? 'Paste a destination address to sign.'
+      : origin === 'solana' && !wallets.tempo
+        ? 'Connect a Tempo settlement signer to sign the Base leg.'
+        : destination === 'solana' && solanaAtaState === 'checking'
+          ? 'Checking the Solana recipient account.'
+          : destination === 'solana' && solanaAtaState === 'missing' && !recipientSolanaWallet
+            ? 'Connect the recipient Solana wallet once to initialize USDC.'
+            : 'Select the required signing wallet above.'
   const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
   const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
   const quoteLive = Boolean(
@@ -246,11 +256,7 @@ export default function App() {
         kind: 'ready',
           message: live
           ? 'Route ready.'
-          : !originWallet
-            ? 'Preview — connect your sending wallet to sign.'
-            : destination === 'solana' && solanaAtaState === 'missing'
-              ? 'Preview — initialize the recipient USDC account to sign.'
-            : 'Preview — add a destination address to sign.',
+          : `Preview — ${signingHint}`,
       })
     } catch (error) {
       clearQuote()
@@ -260,9 +266,9 @@ export default function App() {
 
   // Automatic route preview: typing an amount prices the route without any
   // tap. Runs once per unique request signature so failures never loop.
-  const requestSig = `${origin}|${inputId}|${outputId}|${amount}|${destinationInput}`
+  const requestSig = `${origin}|${inputId}|${outputId}|${amount}|${destinationInput}|${originWallet?.address ?? ''}|${wallets.tempo?.address ?? ''}|${recipientAddress ?? ''}`
   useEffect(() => {
-    if (!amount || !supported || busy || hopQuotes.length === 2 || requestSig === attemptSig) return
+    if (!amount || !supported || busy || requestSig === attemptSig) return
     const timer = setTimeout(() => {
       setAttemptSig(requestSig)
       void getQuote()
@@ -271,16 +277,6 @@ export default function App() {
     // getQuote excluded by design; requestSig + attemptSig gate every run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestSig, attemptSig, amount, supported, busy, hopQuotes.length])
-
-  // When the signing wallet or destination lands after a preview, silently
-  // upgrade to an executable live route. The preview guard runs once.
-  useEffect(() => {
-    if (hopQuotes.length !== 2 || hopMetas.length !== 2 || !originWallet || !recipientAddress || !amount) return
-    if (hopMetas.every((meta) => !isPreviewAddress(meta.depositor) && !isPreviewAddress(meta.recipient))) return
-    void getQuote()
-    // getQuote is intentionally excluded: the preview guard prevents loops.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originWallet?.address, recipientAddress, wallets.tempo?.address])
 
   async function submit() {
     if (!hops || hopQuotes.length !== 2 || !originWallet || !quoteLive) return
@@ -400,7 +396,15 @@ export default function App() {
           </div>
 
           <div className="wallet-pair" aria-label="Wallets">
-            <WalletSlot network={origin} address={originWallet?.address} onConnect={() => connectNetworkWallet(origin)} label="Send from" />
+            <WalletSlot
+              network={origin}
+              address={originWallet?.address}
+              wallets={origin === 'tempo' ? tempoContext.wallets : solanaContext.wallets}
+              onConnect={() => connectNetworkWallet(origin)}
+              onSelect={origin === 'tempo' ? tempoContext.select : solanaContext.select}
+              onDisconnect={origin === 'tempo' ? tempoContext.disconnect : solanaContext.disconnect}
+              label="Send from"
+            />
             <ArrowUpRight className="wallet-pair-arrow" aria-hidden />
             {origin === 'tempo' ? (
               <div className="wallet-slot">
@@ -408,7 +412,15 @@ export default function App() {
                 <div className="slot-note">Paste the recipient below</div>
               </div>
             ) : (
-              <WalletSlot network="tempo" address={wallets.tempo?.address} onConnect={() => connectNetworkWallet('tempo')} label="Settlement signer" />
+              <WalletSlot
+                network="tempo"
+                address={wallets.tempo?.address}
+                wallets={tempoContext.wallets}
+                onConnect={() => connectNetworkWallet('tempo')}
+                onSelect={tempoContext.select}
+                onDisconnect={tempoContext.disconnect}
+                label="Settlement signer"
+              />
             )}
           </div>
           <label className="field-label" htmlFor="send-amount">
@@ -469,12 +481,12 @@ export default function App() {
               : hopQuotes.length === 2
                 ? quoteLive
                   ? 'Expected output across the full route.'
-                  : 'Preview only — connect the required signing wallets to continue.'
+                  : `Preview only — ${signingHint}`
                 : 'Enter an amount to preview the route.'}
           </small>
 
           <label className="field-label destination-label" htmlFor="dest-address">
-            Recipient address <span>(optional)</span>
+            Recipient address <span>(wallet address or paste)</span>
           </label>
           <div className="amount dest-field">
             <input
@@ -544,7 +556,7 @@ export default function App() {
                   Sign in wallet
                 </button>
               ) : (
-                <p className="notice"><CircleAlert size={16} aria-hidden /><span>{destination === 'solana' && solanaAtaState === 'missing' ? 'Initialize the recipient USDC account before signing.' : 'Connect the required signing wallets above to sign.'}</span></p>
+                <p className="notice"><CircleAlert size={16} aria-hidden /><span>{signingHint}</span></p>
               )}
             </div>
           ) : (
@@ -560,7 +572,7 @@ export default function App() {
       <section id="how" className="shell process" aria-label="How it works">
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
-          <Step n="01" t="Connect" d="Choose a From and To wallet above." />
+          <Step n="01" t="Connect" d="Connect the sending wallet; paste the recipient below." />
           <Step n="02" t="Quote" d="Type an amount — pricing is automatic." />
           <Step n="03" t="Sign" d="Approve the signatures your wallet shows." />
           <Step n="04" t="Receive" d="Track delivery to the end." />
@@ -610,16 +622,78 @@ function explorerFor(network: Network, hash: string) {
   return `https://explore.mainnet.tempo.xyz/tx/${hash}`
 }
 
-function WalletSlot({ network, address, onConnect, label }: { network: Network; address?: string; onConnect: () => void; label: string }) {
+function WalletSlot({
+  network,
+  address,
+  wallets,
+  onConnect,
+  onSelect,
+  onDisconnect,
+  label,
+}: {
+  network: Network
+  address?: string
+  wallets: DynamicWallet[]
+  onConnect: () => void
+  onSelect: (walletId: string) => Promise<void>
+  onDisconnect: (walletId: string) => Promise<void>
+  label: string
+}) {
+  const [open, setOpen] = useState(false)
   const logo = network === 'solana' ? <NetworkSolana className="slot-logo" aria-hidden /> : <NetworkTempo className="slot-logo" aria-hidden />
   const name = network === 'solana' ? 'Solana' : 'Tempo'
+  const selected = wallets.find((wallet) => wallet.address === address)
+  const menuId = `${network}-wallet-menu`
   return (
     <div className="wallet-slot">
       <small>{label}</small>
       {address ? (
-        <button type="button" className="slot-chip" onClick={onConnect} aria-label={`Switch ${name} wallet`}>
+        <>
+          <button
+            type="button"
+            className="slot-chip"
+            onClick={() => setOpen((value) => !value)}
+            aria-label={`Manage ${name} wallet connection`}
+            aria-expanded={open}
+            aria-controls={menuId}
+            aria-haspopup="menu"
+          >
           {logo}<strong>{name}</strong><b>{compactAddress(address)}</b>
-        </button>
+          </button>
+          {open && (
+            <div className="wallet-menu" id={menuId} role="menu" aria-label={`${name} wallet connections`}>
+              {wallets.map((wallet) => (
+                <button
+                  type="button"
+                  className="wallet-menu-item"
+                  role="menuitem"
+                  key={wallet.id}
+                  onClick={() => {
+                    setOpen(false)
+                    void onSelect(wallet.id)
+                  }}
+                  aria-current={wallet.address === address ? 'true' : undefined}
+                >
+                  <span>{compactAddress(wallet.address)}</span>
+                  {wallet.address === address && <small>Active</small>}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="wallet-menu-item wallet-menu-danger"
+                role="menuitem"
+                disabled={!selected}
+                onClick={() => {
+                  if (!selected) return
+                  setOpen(false)
+                  void onDisconnect(selected.id)
+                }}
+              >
+                Disconnect {name}
+              </button>
+            </div>
+          )}
+        </>
       ) : (
         <button type="button" className="slot-connect" onClick={onConnect} aria-label={`Connect ${name} wallet`}>
           {logo} Connect {name}

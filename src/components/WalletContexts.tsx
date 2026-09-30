@@ -3,17 +3,19 @@ import { useDynamicContext, useSwitchWallet, useUserWallets } from '@dynamic-lab
 import { SolanaWalletContext, TempoWalletContext } from './wallet-context'
 
 export function TempoWalletBridge({ children }: { children: ReactNode }) {
-  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
+  const { primaryWallet, setShowAuthFlow, removeWallet } = useDynamicContext()
   const switchWallet = useSwitchWallet()
   const userWallets = useUserWallets()
-  const wallet = (primaryWallet?.chain === 'EVM' ? primaryWallet : userWallets.find((entry) => entry.chain === 'EVM')) ?? null
-  return <TempoWalletContext.Provider value={{ wallet, connect: () => setShowAuthFlow(true), activate: () => wallet ? switchWallet(wallet.id) : Promise.resolve() }}>{children}</TempoWalletContext.Provider>
+  const wallets = userWallets.filter((entry) => entry.chain === 'EVM')
+  const wallet = (primaryWallet?.chain === 'EVM' ? primaryWallet : wallets[0]) ?? null
+  return <TempoWalletContext.Provider value={{ wallet, wallets, connect: () => setShowAuthFlow(true), activate: () => wallet ? switchWallet(wallet.id) : Promise.resolve(), select: switchWallet, disconnect: removeWallet }}>{children}</TempoWalletContext.Provider>
 }
 
 export function SolanaWalletBridge({ children }: { children: ReactNode }) {
-  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
+  const { primaryWallet, setShowAuthFlow, removeWallet } = useDynamicContext()
   const switchWallet = useSwitchWallet()
   const userWallets = useUserWallets()
-  const wallet = (primaryWallet?.chain === 'SOL' ? primaryWallet : userWallets.find((entry) => entry.chain === 'SOL')) ?? null
-  return <SolanaWalletContext.Provider value={{ wallet, connect: () => setShowAuthFlow(true), activate: () => wallet ? switchWallet(wallet.id) : Promise.resolve() }}>{children}</SolanaWalletContext.Provider>
+  const wallets = userWallets.filter((entry) => entry.chain === 'SOL')
+  const wallet = (primaryWallet?.chain === 'SOL' ? primaryWallet : wallets[0]) ?? null
+  return <SolanaWalletContext.Provider value={{ wallet, wallets, connect: () => setShowAuthFlow(true), activate: () => wallet ? switchWallet(wallet.id) : Promise.resolve(), select: switchWallet, disconnect: removeWallet }}>{children}</SolanaWalletContext.Provider>
 }
