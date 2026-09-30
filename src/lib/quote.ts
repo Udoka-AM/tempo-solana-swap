@@ -16,6 +16,7 @@ export type AcrossTransaction = {
 export type AcrossQuote = {
   quoteId?: string
   id?: string
+  quoteExpiryTimestamp?: number | string
   expectedOutputAmount?: string
   expectedFillTime?: number
   totalRelayFee?: { total?: string; pct?: string }
@@ -119,6 +120,7 @@ export async function requestQuote(input: QuoteInput) {
     recipient: input.recipient,
     refundAddress: input.depositor,
     refundOnOrigin: 'true',
+    slippage: 'auto',
     strictTradeType: 'true',
   })
   const response = await fetch(`/api/quote?${params}`)

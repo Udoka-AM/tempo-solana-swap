@@ -21,7 +21,8 @@ import { corridorLabel, type RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
-import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
+import { executeEvmQuote, executeSolanaQuote, initializeSolanaUsdcAta, type ExecutionUpdate } from './lib/transactions'
+import { hasSolanaUsdcAta } from './lib/solana-account'
 import RoutePath from './components/RoutePath'
 import { useSolanaWallet, useTempoWallet } from './components/wallet-context'
 
@@ -79,6 +80,7 @@ export default function App() {
   const [attemptSig, setAttemptSig] = useState('')
   const [apiState, setApiState] = useState<'checking' | 'live' | 'degraded'>('checking')
   const [successOpen, setSuccessOpen] = useState(false)
+  const [solanaAtaState, setSolanaAtaState] = useState<'idle' | 'checking' | 'ready' | 'missing' | 'error'>('idle')
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +112,29 @@ export default function App() {
   const manualRecipient = destinationInput.trim()
   const manualError = manualRecipient ? validateAddressFor(destination, manualRecipient) : undefined
   const recipientAddress = !manualError && manualRecipient ? manualRecipient : destWallet?.address
+  const recipientSolanaWallet = solanaContext.wallet?.address === recipientAddress
+
+  useEffect(() => {
+    if (destination !== 'solana' || !recipientAddress || manualError) {
+      setSolanaAtaState('idle')
+      return
+    }
+    let cancelled = false
+    setSolanaAtaState('checking')
+    hasSolanaUsdcAta(recipientAddress)
+      .then((exists) => {
+        if (!cancelled) setSolanaAtaState(exists ? 'ready' : 'missing')
+      })
+      .catch(() => {
+        if (!cancelled) setSolanaAtaState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [destination, manualError, recipientAddress])
+
+  const canPrepareSolanaRecipient =
+    destination !== 'solana' || solanaAtaState === 'ready' || (solanaAtaState === 'missing' && recipientSolanaWallet)
   const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
   const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
   const quoteLive = Boolean(
@@ -118,7 +143,8 @@ export default function App() {
       hopMetas.length === 2 &&
       originWallet?.address === hopMetas[0]?.depositor &&
       recipientAddress === hopMetas[1]?.recipient &&
-      (origin === 'tempo' || wallets.tempo?.address === hopMetas[1]?.depositor),
+      (origin === 'tempo' || wallets.tempo?.address === hopMetas[1]?.depositor) &&
+      canPrepareSolanaRecipient,
   )
   const receive = hopQuotes[1]?.expectedOutputAmount
     ? fromAtomicAmount(hopQuotes[1].expectedOutputAmount, hops?.[1].output.decimals ?? 6)
@@ -190,7 +216,7 @@ export default function App() {
     const final = recipientAddress ?? previewAddressFor(destination)
     const evmSigner = wallets.tempo?.address ?? previewAddressFor('base')
     const [parties1, parties2] = hopParties(origin, sender, final, evmSigner)
-    const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo))
+    const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo) && canPrepareSolanaRecipient)
     setStatus({ kind: 'loading', message: 'Finding your route…' })
     try {
       const first = await requestQuote({
@@ -218,10 +244,12 @@ export default function App() {
       if (manualRecipient && !manualError) saveDestination(destination, manualRecipient)
       setStatus({
         kind: 'ready',
-        message: live
+          message: live
           ? 'Route ready.'
           : !originWallet
             ? 'Preview — connect your sending wallet to sign.'
+            : destination === 'solana' && solanaAtaState === 'missing'
+              ? 'Preview — initialize the recipient USDC account to sign.'
             : 'Preview — add a destination address to sign.',
       })
     } catch (error) {
@@ -288,6 +316,16 @@ export default function App() {
     }
     try {
       setStatus({ kind: 'submitting', message: 'Submitting signature 1 of 2…' })
+      if (destination === 'solana' && solanaAtaState === 'missing') {
+        await initializeSolanaUsdcAta(solanaContext.wallet as never, recipientAddress!, (stage, reference) => {
+          if (stage === 'submitted' && reference) {
+            setStatus({ kind: 'submitting', reference, message: 'USDC account initialized — signing the bridge…' })
+          } else {
+            setStatus({ kind: 'submitting', message: 'Initialize the Solana USDC account in your wallet…' })
+          }
+        })
+        setSolanaAtaState('ready')
+      }
       const hash1 = await runHop(0)
       setStatus({ kind: 'submitting', reference: hash1, references: [hash1], message: 'First signature done — sign the second…' })
       const hash2 = await runHop(1)
@@ -332,7 +370,7 @@ export default function App() {
             <h1>
               Move stablecoins between <em>Tempo</em> and Solana.
             </h1>
-            <p className="hero-sub">Choose your wallets, enter an amount, and review the route before signing.</p>
+          <p className="hero-sub">Connect the sending wallet, paste a recipient, and review the route before signing.</p>
           </div>
           <aside className="scope-card" id="scope" aria-label="Release scope">
             <small>SUPPORTED ASSETS</small>
@@ -362,9 +400,16 @@ export default function App() {
           </div>
 
           <div className="wallet-pair" aria-label="Wallets">
-            <WalletSlot network={origin} address={originWallet?.address} onConnect={() => connectNetworkWallet(origin)} label="From" />
+            <WalletSlot network={origin} address={originWallet?.address} onConnect={() => connectNetworkWallet(origin)} label="Send from" />
             <ArrowUpRight className="wallet-pair-arrow" aria-hidden />
-            <WalletSlot network={destination} address={destWallet?.address} onConnect={() => connectNetworkWallet(destination)} label="To" />
+            {origin === 'tempo' ? (
+              <div className="wallet-slot">
+                <small>To</small>
+                <div className="slot-note">Paste the recipient below</div>
+              </div>
+            ) : (
+              <WalletSlot network="tempo" address={wallets.tempo?.address} onConnect={() => connectNetworkWallet('tempo')} label="Settlement signer" />
+            )}
           </div>
           <label className="field-label" htmlFor="send-amount">
             Send
@@ -447,6 +492,14 @@ export default function App() {
           <small className="field-hint" aria-live="polite">
             {manualError ? (
               <span className="dest-error">{manualError}</span>
+            ) : destination === 'solana' && solanaAtaState === 'checking' ? (
+              <>Checking the recipient’s Solana USDC account…</>
+            ) : destination === 'solana' && solanaAtaState === 'missing' && recipientSolanaWallet ? (
+              <>USDC account missing · your wallet will initialize it before the bridge.</>
+            ) : destination === 'solana' && solanaAtaState === 'missing' ? (
+              <>This recipient has no Solana USDC account. <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>Connect it once to initialize.</button></>
+            ) : destination === 'solana' && solanaAtaState === 'error' ? (
+              <>Could not verify the recipient’s Solana USDC account. Try again.</>
             ) : destWallet?.address ? (
               manualRecipient ? (
                 <>Overriding connected wallet · saved on this device.</>
@@ -491,7 +544,7 @@ export default function App() {
                   Sign in wallet
                 </button>
               ) : (
-                <p className="notice"><CircleAlert size={16} aria-hidden /><span>Connect the required signing wallets above to sign.</span></p>
+                <p className="notice"><CircleAlert size={16} aria-hidden /><span>{destination === 'solana' && solanaAtaState === 'missing' ? 'Initialize the recipient USDC account before signing.' : 'Connect the required signing wallets above to sign.'}</span></p>
               )}
             </div>
           ) : (

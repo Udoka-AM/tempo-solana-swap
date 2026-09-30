@@ -185,6 +185,7 @@ button:disabled { cursor: not-allowed; }
 .slot-chip b { margin-left: auto; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 .slot-connect { background: var(--surface); color: var(--ink); font-weight: 700; justify-content: flex-start; cursor: pointer; }
 .slot-connect:hover { border-color: var(--accent); color: var(--accent); }
+.slot-note { min-height: 38px; display: flex; align-items: center; padding: 7px 10px; border: 1px dashed var(--line); border-radius: var(--radius-sm); color: var(--muted); font-size: 11px; }
 .slot-logo { width: 20px; height: 20px; flex: none; border-radius: 50%; }
 .amount, .receive {
   border: 1px solid var(--line);
@@ -211,6 +212,7 @@ button:disabled { cursor: not-allowed; }
 .token { width: 21px; height: 21px; flex: none; border-radius: 50%; }
 .token-text { border: 1px solid var(--line); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 11px; width: 21px; height: 21px; }
 .field-hint { font-size: 11px; color: var(--muted); display: block; margin: 6px 0 0; line-height: 1.5; }
+.inline-action { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .destination-label { margin-top: 12px; }
 .destination-label span { color: var(--muted); font-weight: 400; }
 .dest-error { color: var(--error); font-weight: 700; }
