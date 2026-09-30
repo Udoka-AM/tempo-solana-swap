@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useDynamicContext, useDynamicModals, useUserWallets } from '@dynamic-labs/sdk-react-core'
 import { NetworkSolana, NetworkTempo, tokenIcons } from '@web3icons/react'
 import {
   ArrowUpDown,
@@ -21,10 +20,10 @@ import {
 import type { RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
-import { pickWallets, walletNetwork } from './lib/wallets'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
 import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
 import RoutePath from './components/RoutePath'
+import { useSolanaWallet, useTempoWallet } from './components/wallet-context'
 
 const TokenUSDC = tokenIcons.TokenUSDC
 const TokenSOL = tokenIcons.TokenSOL
@@ -69,9 +68,8 @@ function AssetPicker({
 }
 
 export default function App() {
-  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
-  const { setShowLinkNewWalletModal } = useDynamicModals()
-  const userWallets = useUserWallets()
+  const tempoContext = useTempoWallet()
+  const solanaContext = useSolanaWallet()
   const [origin, setOrigin] = useState<Direction>('tempo')
   const [inputId, setInputId] = useState<AssetId>('pathUSD')
   const [outputId, setOutputId] = useState<AssetId>('USDC')
@@ -100,9 +98,8 @@ export default function App() {
   const input = findAsset(origin, inputId)!
   const output = findAsset(destination, outputId)!
 
-  const wallets = useMemo(() => pickWallets(userWallets), [userWallets])
-  const originWallet =
-    primaryWallet && walletNetwork(primaryWallet) === origin ? primaryWallet : wallets[origin]
+  const wallets = { tempo: tempoContext.wallet, solana: solanaContext.wallet }
+  const originWallet = wallets[origin]
   const destWallet = wallets[destination]
   // Multihop corridor via Base: Tempo -> Base USDC -> Solana USDC (or reverse).
   // Ends are selectable; the proxy hop is automatic.
@@ -163,9 +160,9 @@ export default function App() {
     changeOrigin(destination)
   }
 
-  function connectNetworkWallet() {
-    if (userWallets.length > 0) setShowLinkNewWalletModal(true)
-    else setShowAuthFlow(true)
+  function connectNetworkWallet(network: Direction) {
+    if (network === 'tempo') tempoContext.connect()
+    else solanaContext.connect()
   }
 
   function reset() {
@@ -328,14 +325,14 @@ export default function App() {
       <section className="shell hero">
         <div className="hero-grid">
           <div>
-            <p className="kicker">Stablecoin corridor · Non-custodial</p>
+            <p className="kicker">Stablecoins · Tempo ↔ Solana</p>
             <h1>
-              One deliberate route between <em>Tempo</em> and Solana.
+              Move stablecoins between <em>Tempo</em> and Solana.
             </h1>
-            <p className="hero-sub">Live route. Your wallet approves each step.</p>
+            <p className="hero-sub">Choose your wallets, enter an amount, and review the route before signing.</p>
           </div>
           <aside className="scope-card" id="scope" aria-label="Release scope">
-            <small>RELEASE SCOPE</small>
+            <small>SUPPORTED ASSETS</small>
             <strong>
               pathUSD / USDC.e <b>↔</b> USDC
             </strong>
@@ -347,27 +344,27 @@ export default function App() {
       <section className="shell swap-section" id="swap" aria-label="Swap">
         <div className="swap-card">
           <div className="card-top">
-            <b>ROUTE BUILDER</b>
+            <b>SWAP</b>
             <button type="button" className="btn-ghost" onClick={reset}>
               <RefreshCw size={14} aria-hidden /> Reset
             </button>
           </div>
           <div className="chain-tabs" role="group" aria-label="Direction">
             <button type="button" aria-pressed={origin === 'tempo'} onClick={() => changeOrigin('tempo')}>
-              From Tempo
+              Tempo → Solana
             </button>
             <button type="button" aria-pressed={origin === 'solana'} onClick={() => changeOrigin('solana')}>
-              From Solana
+              Solana → Tempo
             </button>
           </div>
 
           <div className="wallet-pair" aria-label="Wallets">
-            <WalletSlot network={origin} address={originWallet?.address} onConnect={connectNetworkWallet} label="From" />
+            <WalletSlot network={origin} address={originWallet?.address} onConnect={() => connectNetworkWallet(origin)} label="From" />
             <ArrowUpRight className="wallet-pair-arrow" aria-hidden />
-            <WalletSlot network={destination} address={destWallet?.address} onConnect={connectNetworkWallet} label="To" />
+            <WalletSlot network={destination} address={destWallet?.address} onConnect={() => connectNetworkWallet(destination)} label="To" />
           </div>
           <label className="field-label" htmlFor="send-amount">
-            You send
+            Send
           </label>
           <div className="amount">
             <input
@@ -391,7 +388,7 @@ export default function App() {
               label="Token you send"
             />
           </div>
-          <small className="field-hint">Enter an amount to preview the route automatically.</small>
+          <small className="field-hint">Quote updates as you type.</small>
 
           <div className="flip-row">
             <span aria-hidden />
@@ -401,7 +398,7 @@ export default function App() {
             <span aria-hidden />
           </div>
 
-          <label className="field-label">You receive</label>
+          <label className="field-label">Receive</label>
           <div className="receive" aria-live="polite" aria-busy={status.kind === 'loading'}>
             {status.kind === 'loading' ? (
               <span className="skeleton skeleton-large" role="status" aria-label="Fetching quote" />
@@ -420,16 +417,16 @@ export default function App() {
           </div>
           <small className="field-hint">
             {status.kind === 'loading'
-              ? 'Finding your route — works with or without a connected wallet.'
+              ? 'Finding the best route…'
               : hopQuotes.length === 2
                 ? quoteLive
                   ? 'Expected output across the full route.'
-                  : 'Preview price across the full route — connect your sending wallet and add a destination to sign.'
-                : 'Live quote updates as you type.'}
+                  : 'Preview only — connect the required signing wallets to continue.'
+                : 'Enter an amount to preview the route.'}
           </small>
 
-          <label className="field-label" htmlFor="dest-address" style={{ marginTop: 8 }}>
-            Destination address
+          <label className="field-label destination-label" htmlFor="dest-address">
+            Recipient address <span>(optional)</span>
           </label>
           <div className="amount dest-field">
             <input
@@ -456,7 +453,7 @@ export default function App() {
             ) : manualRecipient ? (
               <>Saved on this device after quoting.</>
             ) : (
-              <>Connect the To wallet above, or paste a destination instead.</>
+              <>Use the To wallet above, or paste a different recipient.</>
             )}
           </small>
 
@@ -487,7 +484,7 @@ export default function App() {
               <Row label="Fee" value={hopQuotes[0]?.totalRelayFee?.total ? `${formatAmount(fromAtomicAmount(hopQuotes[0].totalRelayFee.total, input.decimals))} ${input.symbol}` : 'Included in quote'} />
               <Row label="Delivery" value={deliverySeconds ? `~${deliverySeconds} seconds` : 'A few seconds'} />
               {quoteLive ? (
-                <button type="button" className="btn-primary" onClick={submit} style={{ marginTop: 12 }}>
+                  <button type="button" className="btn-primary" onClick={submit}>
                   Sign in wallet
                 </button>
               ) : (
