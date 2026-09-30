@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeQuote, quoteErrorMessage } from './quote'
+import { isPreviewAddress, normalizeQuote, previewAddressFor, quoteErrorMessage } from './quote'
 
 describe('quote normalization', () => {
   it('maps Across fees.total.amount onto totalRelayFee for the fee UI', () => {
@@ -24,5 +24,17 @@ describe('quote error messages', () => {
 
   it('rejects unsupported pairs plainly', () => {
     expect(quoteErrorMessage({ error: 'unsupported_pair' }, 400)).toMatch(/No live route/)
+  })
+})
+
+describe('preview addresses', () => {
+  it('issues well-formed placeholders per network', () => {
+    expect(previewAddressFor('tempo').startsWith('0x')).toBe(true)
+    expect(previewAddressFor('solana')).toBe('11111111111111111111111111111111')
+  })
+
+  it('detects placeholders so previews can never be signed', () => {
+    expect(isPreviewAddress(previewAddressFor('tempo'))).toBe(true)
+    expect(isPreviewAddress('0xabc')).toBe(false)
   })
 })

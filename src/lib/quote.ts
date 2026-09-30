@@ -34,6 +34,20 @@ type QuoteInput = {
   recipient: string
 }
 
+// Well-formed placeholder addresses used for preview quotes when a wallet is
+// not connected yet. Preview results price the route but are never signed:
+// the review dialog requires both live wallets before any signing step.
+export const PREVIEW_EVM_ADDRESS = '0x000000000000000000000000000000000000dEaD'
+export const PREVIEW_SOLANA_ADDRESS = '11111111111111111111111111111111'
+
+export function previewAddressFor(network: Network) {
+  return network === 'tempo' ? PREVIEW_EVM_ADDRESS : PREVIEW_SOLANA_ADDRESS
+}
+
+export function isPreviewAddress(address: string | undefined) {
+  return address === PREVIEW_EVM_ADDRESS || address === PREVIEW_SOLANA_ADDRESS
+}
+
 type QuoteErrorBody = AcrossQuote & { error?: string; detail?: string }
 
 export function normalizeQuote(body: AcrossQuote): AcrossQuote {

@@ -15,9 +15,21 @@ import {
 } from 'lucide-react'
 import { assetsFor, findAsset, isSupportedPair, type Asset, type AssetId, type Network } from '../shared/assets'
 import { compactAddress, formatAmount, fromAtomicAmount } from './lib/format'
-import { getDepositStatus, getHealth, requestQuote, type AcrossQuote, type DepositStatus } from './lib/quote'
+import {
+  getDepositStatus,
+  getHealth,
+  isPreviewAddress,
+  previewAddressFor,
+  requestQuote,
+  type AcrossQuote,
+  type DepositStatus,
+} from './lib/quote'
 import type { RoutePhase } from './lib/route-viz'
+import { pickWallets, walletNetwork } from './lib/wallets'
+import { loadBalances, type BalanceState } from './lib/balances'
 import RoutePath from './components/RoutePath'
+import Backdrop from './components/Backdrop'
+import Balances from './components/Balances'
 import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
 
 const TokenUSDC = tokenIcons.TokenUSDC
@@ -75,6 +87,8 @@ export default function App() {
   const [apiState, setApiState] = useState<'checking' | 'live' | 'degraded'>('checking')
   const [delivery, setDelivery] = useState<DepositStatus | null>(null)
   const [deliveryState, setDeliveryState] = useState<'idle' | 'checking' | 'error'>('idle')
+  const [balances, setBalances] = useState<BalanceState[]>([])
+  const [balancesLoading, setBalancesLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -94,19 +108,15 @@ export default function App() {
   const input = findAsset(origin, inputId)!
   const output = findAsset(destination, outputId)!
 
-  const wallets = useMemo(
-    () => ({
-      tempo: userWallets.find((wallet) => wallet.address.startsWith('0x')),
-      solana: userWallets.find((wallet) => !wallet.address.startsWith('0x')),
-    }),
-    [userWallets],
-  )
+  const wallets = useMemo(() => pickWallets(userWallets), [userWallets])
   const originWallet =
-    primaryWallet && (origin === 'tempo' ? primaryWallet.address.startsWith('0x') : !primaryWallet.address.startsWith('0x'))
-      ? primaryWallet
-      : wallets[origin]
+    primaryWallet && walletNetwork(primaryWallet) === origin ? primaryWallet : wallets[origin]
   const recipient = wallets[destination]
   const supported = isSupportedPair(origin, input.id, destination, output.id)
+  const [quoteMeta, setQuoteMeta] = useState<{ depositor: string; recipient: string }>()
+  const quoteLive = Boolean(
+    quote && quoteMeta && originWallet?.address === quoteMeta.depositor && recipient?.address === quoteMeta.recipient,
+  )
   const receive = quote?.expectedOutputAmount ? fromAtomicAmount(quote.expectedOutputAmount, output.decimals) : undefined
   const relayFee = quote?.totalRelayFee?.total ? fromAtomicAmount(quote.totalRelayFee.total, input.decimals) : undefined
   const busy = status.kind === 'loading' || status.kind === 'submitting'
@@ -117,6 +127,7 @@ export default function App() {
     setInputId(next === 'tempo' ? 'pathUSD' : 'USDC')
     setOutputId(next === 'tempo' ? 'USDC' : 'pathUSD')
     setQuote(undefined)
+    setQuoteMeta(undefined)
     setStatus({ kind: 'idle' })
   }
 
@@ -127,17 +138,19 @@ export default function App() {
   function reset() {
     setAmount('')
     setQuote(undefined)
+    setQuoteMeta(undefined)
     setStatus({ kind: 'idle' })
     setDelivery(null)
     setDeliveryState('idle')
   }
 
-  async function getQuote() {
-    if (!originWallet || !recipient) {
-      setStatus({ kind: 'error', message: 'Connect an EVM wallet and a Solana wallet first.' })
-      return
-    }
-    setStatus({ kind: 'loading', message: 'Checking the live Across route…' })
+  async function getQuote(openReview = true) {
+    // Quotes are previewable without wallets or balances: missing addresses
+    // fall back to well-formed placeholders. Only live quotes can be signed.
+    const depositor = originWallet?.address ?? previewAddressFor(origin)
+    const destinationAddress = recipient?.address ?? previewAddressFor(destination)
+    const live = Boolean(originWallet && recipient)
+    setStatus({ kind: 'loading', message: live ? 'Checking the live Across route…' : 'Checking a preview route…' })
     try {
       const result = await requestQuote({
         origin,
@@ -145,20 +158,49 @@ export default function App() {
         input,
         output,
         amount,
-        depositor: originWallet.address,
-        recipient: recipient.address,
+        depositor,
+        recipient: destinationAddress,
       })
       setQuote(result)
-      setStatus({ kind: 'ready', message: 'Route ready for review.' })
-      setReview(true)
+      setQuoteMeta({ depositor, recipient: destinationAddress })
+      setStatus({
+        kind: 'ready',
+        message: live ? 'Route ready for review.' : 'Preview quote — connect both wallets to sign.',
+      })
+      if (openReview) setReview(true)
     } catch (error) {
       setQuote(undefined)
+      setQuoteMeta(undefined)
       setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Quote unavailable.' })
     }
   }
 
+  // When both wallets land after a preview quote, silently upgrade to an
+  // executable live quote. The preview guard makes this run at most once.
+  useEffect(() => {
+    if (!quote || !quoteMeta || !originWallet || !recipient || !amount) return
+    if (!isPreviewAddress(quoteMeta.depositor) && !isPreviewAddress(quoteMeta.recipient)) return
+    void getQuote(false)
+    // getQuote is intentionally excluded: the preview guard prevents loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [originWallet?.address, recipient?.address])
+
+  async function refreshBalances() {
+    setBalancesLoading(true)
+    try {
+      setBalances(await loadBalances({ tempo: wallets.tempo?.address, solana: wallets.solana?.address }))
+    } finally {
+      setBalancesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshBalances()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets.tempo?.address, wallets.solana?.address])
+
   async function submit() {
-    if (!quote || !originWallet) return
+    if (!quote || !originWallet || !quoteLive) return
     const update: ExecutionUpdate = (stage, reference) =>
       setStatus({
         kind: stage === 'submitted' ? 'submitted' : 'submitting',
@@ -183,9 +225,16 @@ export default function App() {
     ? status.kind === 'loading'
       ? 'Checking route…'
       : 'Waiting for wallet…'
-    : connectedBoth
-      ? 'Review route'
-      : 'Connect both wallets'
+    : !amount
+      ? 'Enter an amount'
+      : quoteLive
+        ? 'Review live route'
+        : quote
+          ? 'Refresh quote'
+          : connectedBoth
+            ? 'Review route'
+            : 'Preview route'
+  const missingWallets = [!wallets.tempo ? 'EVM' : null, !wallets.solana ? 'Solana' : null].filter(Boolean) as string[]
 
   const routePhase: RoutePhase =
     status.kind === 'loading'
@@ -214,6 +263,7 @@ export default function App() {
 
   return (
     <main id="top">
+      <Backdrop />
       {/* Focused header: brand, minimal nav, status, single connect action */}
       <header className="site-header">
         <div className="site-header-inner">
@@ -282,6 +332,15 @@ export default function App() {
         />
       </section>
 
+      <Balances
+        loading={balancesLoading}
+        balances={balances}
+        tempoAddress={wallets.tempo?.address}
+        solanaAddress={wallets.solana?.address}
+        onConnect={() => setShowAuthFlow(true)}
+        onRefresh={refreshBalances}
+      />
+
       {/* Swap */}
       <section className="shell swap-section" id="swap" aria-label="Swap">
         <div className="swap-card">
@@ -338,8 +397,12 @@ export default function App() {
           </div>
 
           <label className="field-label">You receive</label>
-          <div className="receive" aria-live="polite">
-            <strong>{receive ? formatAmount(receive) : '—'}</strong>
+          <div className="receive" aria-live="polite" aria-busy={status.kind === 'loading'}>
+            {status.kind === 'loading' ? (
+              <span className="skeleton skeleton-large" role="status" aria-label="Fetching quote" />
+            ) : (
+              <strong>{receive ? formatAmount(receive) : '—'}</strong>
+            )}
             <AssetPicker
               value={outputId}
               assets={assetsFor(destination).filter((entry) => entry.bridgeable)}
@@ -348,7 +411,13 @@ export default function App() {
             />
           </div>
           <small className="field-hint">
-            {quote ? 'Expected output from the live Across quote.' : 'Request a quote to calculate what you receive.'}
+            {status.kind === 'loading'
+              ? 'Fetching the route — works with or without a connected wallet.'
+              : quote
+                ? quoteLive
+                  ? 'Expected output from the live Across quote.'
+                  : 'Preview price — connect both wallets for an executable quote.'
+                : 'Request a quote to see what you receive. No wallet or balance needed.'}
           </small>
 
           <RoutePath origin={origin.toUpperCase()} destination={destination.toUpperCase()} phase={routePhase} />
@@ -399,15 +468,25 @@ export default function App() {
             )}
           </div>
 
-          <button type="button" className="btn-primary" disabled={!supported || !amount || busy} onClick={getQuote}>
+          <button type="button" className="btn-primary" disabled={!supported || !amount || busy} onClick={() => getQuote()}>
             {busy && <LoaderCircle className="spin" size={16} aria-hidden />}
             {primaryLabel}
           </button>
           {!connectedBoth && (
             <div className="link-wrap">
+              <small className="field-hint">
+                {missingWallets.length === 2
+                  ? 'No wallets connected — you can still preview a quote.'
+                  : `${missingWallets[0]} wallet not connected — preview works, signing needs both.`}
+              </small>
               <button type="button" className="link-button" onClick={() => setShowAuthFlow(true)}>
-                Connect external wallets <ArrowUpRight size={14} aria-hidden />
+                Connect {missingWallets.join(' + ')} wallet{missingWallets.length > 1 ? 's' : ''} <ArrowUpRight size={14} aria-hidden />
               </button>
+            </div>
+          )}
+          {connectedBoth && quote && !quoteLive && (
+            <div className="link-wrap">
+              <small className="field-hint">Wallets connected — refresh for an executable live quote.</small>
             </div>
           )}
           {!supported && (
@@ -477,11 +556,21 @@ export default function App() {
               </Dialog.Description>
               <p className="notice">
                 <CircleAlert size={16} aria-hidden />
-                <span>No transaction has been submitted. The next step opens your wallet.</span>
+                <span>
+                  {quoteLive
+                    ? 'No transaction has been submitted. The next step opens your wallet.'
+                    : 'Preview only — this quote was priced without your wallets and cannot be signed. Connect both wallets to get an executable route.'}
+                </span>
               </p>
-              <button type="button" className="btn-primary" onClick={submit}>
-                Sign in wallet
-              </button>
+              {quoteLive ? (
+                <button type="button" className="btn-primary" onClick={submit}>
+                  Sign in wallet
+                </button>
+              ) : (
+                <button type="button" className="btn-primary" onClick={() => { setReview(false); setShowAuthFlow(true) }}>
+                  Connect wallets to sign
+                </button>
+              )}
             </Dialog.Content>
           </Dialog.Overlay>
         </Dialog.Portal>
