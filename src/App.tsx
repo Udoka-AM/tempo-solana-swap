@@ -26,6 +26,7 @@ import {
 } from './lib/quote'
 import type { RoutePhase } from './lib/route-viz'
 import { pickWallets, walletNetwork } from './lib/wallets'
+import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
 import { loadBalances, type BalanceState } from './lib/balances'
 import RoutePath from './components/RoutePath'
 import Backdrop from './components/Backdrop'
@@ -81,6 +82,7 @@ export default function App() {
   const [inputId, setInputId] = useState<AssetId>('pathUSD')
   const [outputId, setOutputId] = useState<AssetId>('USDC')
   const [amount, setAmount] = useState('')
+  const [destinationInput, setDestinationInput] = useState(() => loadSavedDestination('solana'))
   const [quote, setQuote] = useState<AcrossQuote>()
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [review, setReview] = useState(false)
@@ -111,23 +113,34 @@ export default function App() {
   const wallets = useMemo(() => pickWallets(userWallets), [userWallets])
   const originWallet =
     primaryWallet && walletNetwork(primaryWallet) === origin ? primaryWallet : wallets[origin]
-  const recipient = wallets[destination]
+  const destWallet = wallets[destination]
   const supported = isSupportedPair(origin, input.id, destination, output.id)
+  // One signing wallet + a destination address. The destination comes from a
+  // second connected wallet when present, else from the pasted (saved) input.
+  const manualRecipient = destinationInput.trim()
+  const manualError = manualRecipient ? validateAddressFor(destination, manualRecipient) : undefined
+  const recipientAddress = !manualError && manualRecipient ? manualRecipient : destWallet?.address
   const [quoteMeta, setQuoteMeta] = useState<{ depositor: string; recipient: string }>()
   const quoteLive = Boolean(
-    quote && quoteMeta && originWallet?.address === quoteMeta.depositor && recipient?.address === quoteMeta.recipient,
+    quote && quoteMeta && originWallet?.address === quoteMeta.depositor && recipientAddress === quoteMeta.recipient,
   )
   const receive = quote?.expectedOutputAmount ? fromAtomicAmount(quote.expectedOutputAmount, output.decimals) : undefined
   const relayFee = quote?.totalRelayFee?.total ? fromAtomicAmount(quote.totalRelayFee.total, input.decimals) : undefined
   const busy = status.kind === 'loading' || status.kind === 'submitting'
-  const connectedBoth = Boolean(originWallet && recipient)
+  const originConnected = Boolean(originWallet)
+
+  function clearQuote() {
+    setQuote(undefined)
+    setQuoteMeta(undefined)
+  }
 
   function changeOrigin(next: Network) {
+    const nextDestination: Network = next === 'tempo' ? 'solana' : 'tempo'
     setOrigin(next)
     setInputId(next === 'tempo' ? 'pathUSD' : 'USDC')
     setOutputId(next === 'tempo' ? 'USDC' : 'pathUSD')
-    setQuote(undefined)
-    setQuoteMeta(undefined)
+    setDestinationInput(loadSavedDestination(nextDestination))
+    clearQuote()
     setStatus({ kind: 'idle' })
   }
 
@@ -137,19 +150,23 @@ export default function App() {
 
   function reset() {
     setAmount('')
-    setQuote(undefined)
-    setQuoteMeta(undefined)
+    clearQuote()
     setStatus({ kind: 'idle' })
     setDelivery(null)
     setDeliveryState('idle')
   }
 
   async function getQuote(openReview = true) {
-    // Quotes are previewable without wallets or balances: missing addresses
-    // fall back to well-formed placeholders. Only live quotes can be signed.
+    if (manualError) {
+      setStatus({ kind: 'error', message: manualError })
+      return
+    }
+    // Only the sending wallet signs. The destination is the second connected
+    // wallet when present, else the pasted address. Missing sides fall back
+    // to placeholders for a preview that can never be signed.
     const depositor = originWallet?.address ?? previewAddressFor(origin)
-    const destinationAddress = recipient?.address ?? previewAddressFor(destination)
-    const live = Boolean(originWallet && recipient)
+    const destinationAddress = recipientAddress ?? previewAddressFor(destination)
+    const live = Boolean(originWallet && recipientAddress)
     setStatus({ kind: 'loading', message: live ? 'Checking the live Across route…' : 'Checking a preview route…' })
     try {
       const result = await requestQuote({
@@ -163,27 +180,31 @@ export default function App() {
       })
       setQuote(result)
       setQuoteMeta({ depositor, recipient: destinationAddress })
+      if (manualRecipient && !manualError) saveDestination(destination, manualRecipient)
       setStatus({
         kind: 'ready',
-        message: live ? 'Route ready for review.' : 'Preview quote — connect both wallets to sign.',
+        message: live
+          ? 'Route ready for review.'
+          : !originWallet
+            ? 'Preview quote — connect your sending wallet to sign.'
+            : 'Preview quote — add a destination address to sign.',
       })
       if (openReview) setReview(true)
     } catch (error) {
-      setQuote(undefined)
-      setQuoteMeta(undefined)
+      clearQuote()
       setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Quote unavailable.' })
     }
   }
 
-  // When both wallets land after a preview quote, silently upgrade to an
-  // executable live quote. The preview guard makes this run at most once.
+  // When the signing wallet or destination lands after a preview quote,
+  // silently upgrade to an executable live quote. The preview guard runs once.
   useEffect(() => {
-    if (!quote || !quoteMeta || !originWallet || !recipient || !amount) return
+    if (!quote || !quoteMeta || !originWallet || !recipientAddress || !amount) return
     if (!isPreviewAddress(quoteMeta.depositor) && !isPreviewAddress(quoteMeta.recipient)) return
     void getQuote(false)
     // getQuote is intentionally excluded: the preview guard prevents loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originWallet?.address, recipient?.address])
+  }, [originWallet?.address, recipientAddress])
 
   async function refreshBalances() {
     setBalancesLoading(true)
@@ -231,10 +252,10 @@ export default function App() {
         ? 'Review live route'
         : quote
           ? 'Refresh quote'
-          : connectedBoth
-            ? 'Review route'
+          : originConnected && recipientAddress
+            ? 'Get live quote'
             : 'Preview route'
-  const missingWallets = [!wallets.tempo ? 'EVM' : null, !wallets.solana ? 'Solana' : null].filter(Boolean) as string[]
+  const canSign = originConnected && Boolean(recipientAddress) && !manualError
 
   const routePhase: RoutePhase =
     status.kind === 'loading'
@@ -376,13 +397,16 @@ export default function App() {
               value={amount}
               onChange={(e) => {
                 setAmount(e.target.value)
-                setQuote(undefined)
+                clearQuote()
               }}
             />
             <AssetPicker
               value={inputId}
               assets={assetsFor(origin).filter((entry) => entry.bridgeable)}
-              onChange={setInputId}
+              onChange={(id) => {
+                setInputId(id)
+                clearQuote()
+              }}
               label="Token you send"
             />
           </div>
@@ -406,7 +430,10 @@ export default function App() {
             <AssetPicker
               value={outputId}
               assets={assetsFor(destination).filter((entry) => entry.bridgeable)}
-              onChange={setOutputId}
+              onChange={(id) => {
+                setOutputId(id)
+                clearQuote()
+              }}
               label="Token you receive"
             />
           </div>
@@ -416,8 +443,40 @@ export default function App() {
               : quote
                 ? quoteLive
                   ? 'Expected output from the live Across quote.'
-                  : 'Preview price — connect both wallets for an executable quote.'
+                  : 'Preview price — connect your sending wallet and add a destination to sign.'
                 : 'Request a quote to see what you receive. No wallet or balance needed.'}
+          </small>
+
+          <label className="field-label" htmlFor="dest-address" style={{ marginTop: 16 }}>
+            Destination address ({destination === 'tempo' ? 'EVM' : 'Solana'})
+          </label>
+          <div className="amount dest-field">
+            <input
+              id="dest-address"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={destination === 'tempo' ? '0x…' : 'Paste Solana address…'}
+              value={destinationInput}
+              onChange={(e) => {
+                setDestinationInput(e.target.value)
+                clearQuote()
+              }}
+            />
+          </div>
+          <small className="field-hint" aria-live="polite">
+            {manualError ? (
+              <span className="dest-error">{manualError}</span>
+            ) : destWallet?.address ? (
+              manualRecipient ? (
+                <>Overriding connected wallet {compactAddress(destWallet.address)} · saved on this device after quoting.</>
+              ) : (
+                <>Using connected wallet {compactAddress(destWallet.address)} · or paste a different address.</>
+              )
+            ) : manualRecipient ? (
+              <>Saved on this device after quoting.</>
+            ) : (
+              <>Only your sending wallet needs to connect — paste where the funds land.</>
+            )}
           </small>
 
           <RoutePath origin={origin.toUpperCase()} destination={destination.toUpperCase()} phase={routePhase} />
@@ -468,25 +527,34 @@ export default function App() {
             )}
           </div>
 
-          <button type="button" className="btn-primary" disabled={!supported || !amount || busy} onClick={() => getQuote()}>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!supported || !amount || busy || Boolean(manualError)}
+            onClick={() => getQuote()}
+          >
             {busy && <LoaderCircle className="spin" size={16} aria-hidden />}
             {primaryLabel}
           </button>
-          {!connectedBoth && (
+          {!canSign && (
             <div className="link-wrap">
               <small className="field-hint">
-                {missingWallets.length === 2
-                  ? 'No wallets connected — you can still preview a quote.'
-                  : `${missingWallets[0]} wallet not connected — preview works, signing needs both.`}
+                {!originConnected && !recipientAddress
+                  ? 'No sending wallet and no destination — you can still preview a quote.'
+                  : !originConnected
+                    ? `Connect your ${origin === 'tempo' ? 'EVM' : 'Solana'} sending wallet to sign — preview works now.`
+                    : 'Add a destination address to sign — preview works now.'}
               </small>
-              <button type="button" className="link-button" onClick={() => setShowAuthFlow(true)}>
-                Connect {missingWallets.join(' + ')} wallet{missingWallets.length > 1 ? 's' : ''} <ArrowUpRight size={14} aria-hidden />
-              </button>
+              {!originConnected && (
+                <button type="button" className="link-button" onClick={() => setShowAuthFlow(true)}>
+                  Connect sending wallet <ArrowUpRight size={14} aria-hidden />
+                </button>
+              )}
             </div>
           )}
-          {connectedBoth && quote && !quoteLive && (
+          {canSign && quote && !quoteLive && (
             <div className="link-wrap">
-              <small className="field-hint">Wallets connected — refresh for an executable live quote.</small>
+              <small className="field-hint">Details changed — refresh for an executable live quote.</small>
             </div>
           )}
           {!supported && (
@@ -515,8 +583,8 @@ export default function App() {
       <section id="how" className="shell process" aria-label="How it works">
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
-          <Step n="01" t="Connect" d="Link external EVM and Solana wallets with Dynamic." />
-          <Step n="02" t="Quote" d="Same-origin functions fetch a short-lived supported Across route." />
+          <Step n="01" t="Connect" d="Connect your sending wallet once — EVM or Solana." />
+          <Step n="02" t="Quote" d="Paste the destination address; preview or live quotes price instantly." />
           <Step n="03" t="Sign" d="Your wallet approves and submits the bridge deposit." />
           <Step n="04" t="Receive" d="Track the submitted route through to delivery." />
         </div>
@@ -546,8 +614,8 @@ export default function App() {
               </Dialog.Title>
               <Dialog.Description asChild>
                 <div>
-                  <Row label="Send from" value={compactAddress(originWallet?.address)} />
-                  <Row label="Receive at" value={compactAddress(recipient?.address)} />
+                  <Row label="Send from" value={compactAddress(quoteMeta?.depositor)} />
+                  <Row label="Receive at" value={compactAddress(quoteMeta?.recipient)} />
                   <Row
                     label="Fee"
                     value={relayFee ? `${formatAmount(relayFee)} ${input.symbol}` : 'Included in quote'}
@@ -558,8 +626,8 @@ export default function App() {
                 <CircleAlert size={16} aria-hidden />
                 <span>
                   {quoteLive
-                    ? 'No transaction has been submitted. The next step opens your wallet.'
-                    : 'Preview only — this quote was priced without your wallets and cannot be signed. Connect both wallets to get an executable route.'}
+                    ? 'No transaction has been submitted. The next step opens your sending wallet.'
+                    : 'Preview only — connect your sending wallet and add a destination address for an executable route.'}
                 </span>
               </p>
               {quoteLive ? (
@@ -568,7 +636,7 @@ export default function App() {
                 </button>
               ) : (
                 <button type="button" className="btn-primary" onClick={() => { setReview(false); setShowAuthFlow(true) }}>
-                  Connect wallets to sign
+                  Connect sending wallet
                 </button>
               )}
             </Dialog.Content>
