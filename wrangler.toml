@@ -1,0 +1,7 @@
+name = "tempo-solana-swap"
+compatibility_date = "2026-09-30"
+pages_build_output_dir = "dist"
+
+[vars]
+# The public URL is optional but enables an exact CORS check for API clients.
+# PUBLIC_APP_ORIGIN = "https://tempo-solana-swap.pages.dev"

@@ -1,0 +1,47 @@
+name: Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build-deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      VITE_DYNAMIC_ENVIRONMENT_ID: ${{ secrets.VITE_DYNAMIC_ENVIRONMENT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Deploy Pages Functions and site
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npx wrangler pages deploy dist --project-name tempo-solana-swap --branch "pr-${{ github.event.pull_request.number }}"
+          else
+            npx wrangler pages deploy dist --project-name tempo-solana-swap --branch main
+          fi
+      - name: Synchronize production-only function secrets
+        if: github.ref == 'refs/heads/main'
+        env:
+          ACROSS_API_KEY: ${{ secrets.ACROSS_API_KEY }}
+          ACROSS_INTEGRATOR_ID: ${{ secrets.ACROSS_INTEGRATOR_ID }}
+        run: |
+          printf '%s' "$ACROSS_API_KEY" | npx wrangler pages secret put ACROSS_API_KEY --project-name tempo-solana-swap
+          printf '%s' "$ACROSS_INTEGRATOR_ID" | npx wrangler pages secret put ACROSS_INTEGRATOR_ID --project-name tempo-solana-swap
