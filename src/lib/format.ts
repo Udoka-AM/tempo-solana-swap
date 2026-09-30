@@ -8,6 +8,14 @@ export function formatAmount(value: string | number | undefined, maximumFraction
   return Number.isFinite(number) ? new Intl.NumberFormat('en-US', { maximumFractionDigits }).format(number) : '—'
 }
 
+// Amount inputs accept digits and a single decimal point only.
+export function sanitizeAmount(value: string) {
+  const cleaned = value.replace(/[^0-9.]/g, '')
+  const dot = cleaned.indexOf('.')
+  if (dot === -1) return cleaned
+  return `${cleaned.slice(0, dot + 1)}${cleaned.slice(dot + 1).replace(/\./g, '')}`
+}
+
 export function toAtomicAmount(value: string, decimals: number) {
   const [whole = '0', fraction = ''] = value.trim().split('.')
   if (!/^\d*$/.test(whole) || !/^\d*$/.test(fraction)) return undefined

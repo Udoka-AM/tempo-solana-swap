@@ -262,6 +262,7 @@ button:disabled { cursor: not-allowed; }
 .route-line b { color: var(--accent); }
 .btn-primary { width: 100%; margin-top: 4px; }
 .link-wrap { text-align: center; }
+.connect-row { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .link-button {
   background: none; border: 0; color: var(--faint); font-size: 12px;
   display: inline-flex; align-items: center; gap: 6px; padding: 0; margin-top: 12px;
@@ -325,6 +326,9 @@ button:disabled { cursor: not-allowed; }
 /* ---------- route visualization (functional motion) ---------- */
 .route-viz { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 18px 0; padding: 12px 0 8px; }
 .route-viz svg { width: 100%; height: auto; display: block; }
+.route-ends { display: flex; justify-content: space-between; align-items: center; padding: 2px 2px 6px; }
+.route-end { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+.chain-logo { width: 26px; height: 26px; flex: none; border-radius: 50%; }
 .route-grid circle { fill: var(--line-soft); opacity: 0.7; }
 .route-trail.is-animating { animation: route-dash 1.1s linear infinite; }
 @keyframes route-dash { to { stroke-dashoffset: -14; } }
@@ -332,7 +336,6 @@ button:disabled { cursor: not-allowed; }
 .route-arrived { animation: arrived-pulse 1.6s ease-out infinite; }
 @keyframes arrived-pulse { 0% { opacity: 1; } 50% { opacity: 0.45; } 100% { opacity: 1; } }
 .route-caption { font-size: 10px; fill: var(--muted); font-family: inherit; letter-spacing: 0.06em; }
-.route-proxy { font-size: 8px; fill: var(--bg); font-family: inherit; letter-spacing: 0.08em; }
 .route-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; color: var(--muted); padding: 8px 2px 2px; }
 .route-meta b { color: var(--ink); }
 .route-viz[data-phase="error"] .route-meta b { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
@@ -386,6 +389,32 @@ button:disabled { cursor: not-allowed; }
 .balance-card strong { font-size: 18px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .balance-card span { font-size: 10px; color: var(--muted); }
 
+/* ---------- fee breakdown (subtle inline reveal) ---------- */
+.fee-empty { font-size: 11px; color: var(--muted); margin: 0; }
+.fee-break { border-top: 1px solid var(--line-soft); }
+.fee-summary {
+  width: 100%;
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: 0; padding: 12px 0;
+  font-size: 11px; color: var(--ink); text-align: left;
+  min-height: 44px;
+}
+.fee-bar { display: flex; gap: 2px; width: 72px; flex: none; height: 6px; }
+.fee-bar i { display: block; height: 100%; border-radius: 3px; background: var(--line-soft); }
+.fee-bar i[data-seg="0"] { background: var(--ink); }
+.fee-bar i[data-seg="1"] { background: var(--accent); }
+.fee-total { flex: 1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fee-chevron { flex: none; color: var(--muted); transition: transform 160ms ease-out; }
+.fee-chevron.is-open { transform: rotate(180deg); }
+.fee-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms ease-out; }
+.fee-detail.is-open { grid-template-rows: 1fr; }
+.fee-detail > ul { overflow: hidden; list-style: none; margin: 0; padding: 0; min-height: 0; }
+.fee-detail li { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px dashed var(--line-soft); }
+.fee-detail li > div { display: grid; gap: 3px; min-width: 0; }
+.fee-detail b { font-size: 11px; }
+.fee-detail span { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fee-mini { width: 72px; height: 28px; flex: none; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
   .hero-grid { grid-template-columns: 1fr; gap: 24px; }
@@ -424,4 +453,5 @@ button:disabled { cursor: not-allowed; }
   html { scroll-behavior: auto; }
   .spin, .live-dot, .route-trail.is-animating, .route-arrived, .skeleton, .ambient-drift { animation: none; }
   .route-viz .route-packet { display: none; }
+  .fee-detail, .fee-chevron { transition: none; }
 }

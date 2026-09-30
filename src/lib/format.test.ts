@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromAtomicAmount, toAtomicAmount } from './format'
+import { fromAtomicAmount, sanitizeAmount, toAtomicAmount } from './format'
 
 describe('token amount helpers', () => {
   it('encodes six-decimal stablecoin amounts without floating point arithmetic', () => {
@@ -8,5 +8,10 @@ describe('token amount helpers', () => {
   })
   it('renders an atomic stablecoin balance', () => {
     expect(fromAtomicAmount('1500000', 6)).toBe('1.5')
+  })
+  it('keeps amount inputs numeric with a single decimal point', () => {
+    expect(sanitizeAmount('12abc.34.5')).toBe('12.345')
+    expect(sanitizeAmount('..5')).toBe('.5')
+    expect(sanitizeAmount('')).toBe('')
   })
 })

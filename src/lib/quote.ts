@@ -18,7 +18,7 @@ export type AcrossQuote = {
   expectedOutputAmount?: string
   expectedFillTime?: number
   totalRelayFee?: { total?: string; pct?: string }
-  fees?: { total?: { amount?: string; pct?: string } }
+  fees?: { total?: { amount?: string; pct?: string; amountUsd?: string } }
   approvalTxns?: AcrossTransaction[]
   swapTx?: AcrossTransaction
   depositTx?: AcrossTransaction
@@ -58,6 +58,12 @@ export function normalizeQuote(body: AcrossQuote): AcrossQuote {
     return { ...body, totalRelayFee: { total: relayTotal, pct: body.fees?.total?.pct } }
   }
   return body
+}
+
+export function quoteFeeUsd(body: AcrossQuote): number | undefined {
+  const raw = body.fees?.total?.amountUsd
+  const value = raw === undefined ? NaN : Number(raw)
+  return Number.isFinite(value) ? value : undefined
 }
 
 export function extractUpstreamMessage(detail: string | undefined): string | undefined {

@@ -1,25 +1,45 @@
+import { NetworkSolana, NetworkTempo } from '@web3icons/react'
 import { isAnimatingPhase, phaseLabel, type RoutePhase } from '../lib/route-viz'
 
 type Props = {
-  stations: [string, string, string]
+  from: 'tempo' | 'solana'
+  to: 'tempo' | 'solana'
   phase: RoutePhase
 }
 
-// High-definition SVG route: origin -> Base proxy -> destination, bridged by
-// Across across two hops. Crisp at any DPR (vector, non-scaling stroke) with
-// functional motion only: the packet travels while loading/submitting, the
-// trail solidifies on ready.
-const X = [72, 320, 568]
-const TRACK = `M${X[0]} 60 C 150 60, 170 60, ${X[1]} 60 S 470 60, ${X[2]} 60`
+function ChainLogo({ chain }: { chain: 'tempo' | 'solana' }) {
+  return chain === 'tempo' ? (
+    <NetworkTempo className="chain-logo" aria-hidden />
+  ) : (
+    <NetworkSolana className="chain-logo" aria-hidden />
+  )
+}
 
-export default function RoutePath({ stations, phase }: Props) {
-  const label = `${phaseLabel(phase, stations[0], `${stations[2]} via ${stations[1]}`)}: hop 1 ${stations[0]} to ${stations[1]}, hop 2 ${stations[1]} to ${stations[2]}`
+function nameOf(chain: 'tempo' | 'solana') {
+  return chain === 'tempo' ? 'Tempo' : 'Solana'
+}
+
+// Bridge path with the native chain marks on each end. Crisp at any DPR
+// (vector, non-scaling stroke) with functional motion only: the packet
+// travels while loading/submitting, the trail solidifies on ready.
+export default function RoutePath({ from, to, phase }: Props) {
+  const label = phaseLabel(phase, nameOf(from), nameOf(to))
   const active = phase === 'ready' || phase === 'submitted'
   const failed = phase === 'error'
   const animating = isAnimatingPhase(phase)
   return (
     <div className="route-viz" data-phase={phase}>
-      <svg viewBox="0 0 640 120" role="img" aria-label={label} focusable="false" aria-hidden={false}>
+      <div className="route-ends" aria-hidden="true">
+        <span className="route-end">
+          <ChainLogo chain={from} />
+          {nameOf(from).toUpperCase()}
+        </span>
+        <span className="route-end">
+          {nameOf(to).toUpperCase()}
+          <ChainLogo chain={to} />
+        </span>
+      </div>
+      <svg viewBox="0 0 640 84" role="img" aria-label={label} focusable="false" aria-hidden={false}>
         <defs>
           <linearGradient id="route-trail" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="var(--ink)" stopOpacity="0.9" />
@@ -27,26 +47,23 @@ export default function RoutePath({ stations, phase }: Props) {
             <stop offset="100%" stopColor="var(--ink)" stopOpacity="0.9" />
           </linearGradient>
         </defs>
-        {/* faint station grid */}
         <g className="route-grid" aria-hidden="true">
           {Array.from({ length: 16 }, (_, i) => (
-            <circle key={i} cx={20 + i * 40} cy={60} r={1.2} />
+            <circle key={i} cx={20 + i * 40} cy={42} r={1.2} />
           ))}
         </g>
-        {/* base track */}
         <path
           id="route-track"
-          d={TRACK}
+          d="M40 42 C 200 42, 240 42, 320 42 S 480 42, 600 42"
           fill="none"
           stroke="var(--line-soft)"
           strokeWidth={2}
           vectorEffect="non-scaling-stroke"
           strokeLinecap="round"
         />
-        {/* live trail */}
         <path
           className={animating ? 'route-trail is-animating' : 'route-trail'}
-          d={TRACK}
+          d="M40 42 C 200 42, 240 42, 320 42 S 480 42, 600 42"
           fill="none"
           stroke={failed ? 'var(--line-soft)' : 'url(#route-trail)'}
           strokeWidth={active || animating ? 2.5 : 2}
@@ -55,7 +72,6 @@ export default function RoutePath({ stations, phase }: Props) {
           strokeDasharray={active ? 'none' : '7 7'}
           opacity={phase === 'idle' ? 0.55 : 1}
         />
-        {/* travelling packet */}
         {animating && !failed && (
           <circle r={6} className="route-packet" fill="var(--accent)" stroke="var(--bg)" strokeWidth={2}>
             <animateMotion dur={phase === 'loading' ? '2.2s' : '1.4s'} repeatCount="indefinite" rotate="0">
@@ -63,35 +79,15 @@ export default function RoutePath({ stations, phase }: Props) {
             </animateMotion>
           </circle>
         )}
-        {active && <circle cx={X[2]} cy={60} r={5} className="route-arrived" fill="var(--accent)" />}
-        {/* station nodes */}
-        {X.map((x, index) => (
-          <g key={stations[index]} className={`route-node ${phase !== 'idle' && !failed ? 'is-live' : ''}`}>
-            <circle cx={x} cy={60} r={16} fill="var(--surface)" stroke="var(--ink)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-            <circle cx={x} cy={60} r={5} fill={index === 2 && active ? 'var(--accent)' : 'var(--ink)'} />
-          </g>
-        ))}
-        {/* proxy marker */}
-        <g aria-hidden="true">
-          <rect x={X[1] - 14} y={22} width={28} height={16} rx={4} fill="var(--ink)" />
-          <text x={X[1]} y={34} textAnchor="middle" className="route-proxy">
-            PROXY
-          </text>
-        </g>
-        <text x={X[0]} y={102} textAnchor="middle" className="route-caption">
-          {stations[0]}
-        </text>
-        <text x={X[1]} y={102} textAnchor="middle" className="route-caption">
-          {stations[1]}
-        </text>
-        <text x={X[2]} y={102} textAnchor="middle" className="route-caption">
-          {stations[2]}
-        </text>
+        {active && <circle cx={600} cy={42} r={5} className="route-arrived" fill="var(--accent)" />}
+        <circle cx={40} cy={42} r={6} fill="var(--ink)" aria-hidden="true" />
+        <circle cx={320} cy={42} r={4} fill="var(--surface)" stroke="var(--ink)" strokeWidth={2} vectorEffect="non-scaling-stroke" aria-hidden="true" />
+        <circle cx={600} cy={42} r={6} fill={active ? 'var(--accent)' : 'var(--ink)'} aria-hidden="true" />
       </svg>
       <div className="route-meta" aria-hidden="true">
-        <span>HOP 1 · {stations[0]} → {stations[1]}</span>
-        <b>{failed ? 'NO LIVE ROUTE' : active ? 'LIVE 2-HOP QUOTE' : animating ? 'FETCHING…' : 'ACROSS ×2'}</b>
-        <span>HOP 2 · {stations[1]} → {stations[2]}</span>
+        <span>{nameOf(from).toUpperCase()}</span>
+        <b>{failed ? 'NO LIVE ROUTE' : active ? 'LIVE ROUTE' : animating ? 'FINDING…' : 'ACROSS'}</b>
+        <span>{nameOf(to).toUpperCase()}</span>
       </div>
     </div>
   )
