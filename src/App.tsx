@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NetworkSolana, NetworkTempo, tokenIcons } from '@web3icons/react'
 import {
   ArrowUpDown,
@@ -135,20 +135,20 @@ export default function App() {
   const canPrepareSolanaRecipient =
     destination !== 'solana' || solanaAtaState === 'ready' || (solanaAtaState === 'missing' && recipientSolanaWallet)
   const signingHint = !originWallet
-    ? `Connect your ${origin === 'tempo' ? 'Tempo' : 'Solana'} wallet to sign.`
+    ? `Connect ${origin === 'tempo' ? 'Tempo' : 'Solana'} to sign.`
     : !recipientAddress
-      ? 'Paste a destination address to sign.'
+      ? 'Add a recipient to sign.'
       : origin === 'solana' && !wallets.tempo
-        ? 'Connect a Tempo settlement signer to sign the Base leg.'
+        ? 'Connect the Tempo signer.'
         : destination === 'solana' && solanaAtaState === 'checking'
-          ? 'Connect the recipient wallet to verify it before signing.'
+          ? 'Verify the recipient before signing.'
           : destination === 'solana' && solanaAtaState === 'missing' && !recipientSolanaWallet
-            ? 'Connect the recipient Solana wallet once to initialize USDC before signing.'
+            ? 'Connect the recipient once.'
             : destination === 'solana' && solanaAtaState === 'missing'
-              ? 'Initialize the recipient Solana USDC account before signing.'
+              ? 'Initialize USDC once.'
               : destination === 'solana' && solanaAtaState === 'error'
-                ? 'Verify the recipient Solana USDC account before signing.'
-            : 'Select the required signing wallet above.'
+                ? 'Verify the Solana account.'
+                : 'Connect required wallets.'
   const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
   const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
   const quoteLive = Boolean(
@@ -396,7 +396,7 @@ export default function App() {
             <h1>
               Move stablecoins between <em>Tempo</em> and Solana.
             </h1>
-          <p className="hero-sub">Connect the sending wallet, paste a recipient, and review the route before signing.</p>
+          <p className="hero-sub">Connect on one side. Paste or connect on the other.</p>
           </div>
           <aside className="scope-card" id="scope" aria-label="Release scope">
             <small>SUPPORTED ASSETS</small>
@@ -436,22 +436,48 @@ export default function App() {
               label="Send from"
             />
             <ArrowUpRight className="wallet-pair-arrow" aria-hidden />
-            {origin === 'tempo' ? (
-              <div className="wallet-slot">
-                <small>To</small>
-                <div className="slot-note">Paste the recipient below</div>
+            <WalletSlot
+              network={destination}
+              address={destWallet?.address}
+              wallets={destination === 'tempo' ? tempoContext.wallets : solanaContext.wallets}
+              onConnect={() => connectNetworkWallet(destination)}
+              onSelect={destination === 'tempo' ? tempoContext.select : solanaContext.select}
+              onDisconnect={destination === 'tempo' ? tempoContext.disconnect : solanaContext.disconnect}
+              label={`To ${destination === 'tempo' ? 'Tempo' : 'Solana'}`}
+            >
+              <div className="slot-address">
+                <span className="slot-or">or paste address</span>
+                <input
+                  className="slot-address-input"
+                  id="dest-address"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={destination === 'tempo' ? '0x…' : 'Solana address…'}
+                  value={destinationInput}
+                  aria-describedby="dest-address-help"
+                  aria-invalid={Boolean(manualError)}
+                  onChange={(e) => {
+                    setDestinationInput(e.target.value)
+                    clearQuote()
+                  }}
+                />
+                <small id="dest-address-help" className="slot-status" aria-live="polite">
+                  {manualError ? (
+                    <span className="dest-error">{manualError}</span>
+                  ) : destination === 'solana' && solanaAtaState === 'checking' ? (
+                    <>Verifying recipient…</>
+                  ) : destination === 'solana' && solanaAtaState === 'missing' && recipientSolanaWallet ? (
+                    <>USDC account missing · <button type="button" className="inline-action" onClick={() => void initializeRecipientAccount()}>Initialize</button></>
+                  ) : destination === 'solana' && solanaAtaState === 'missing' ? (
+                    <>Preview ready · <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>connect recipient once</button></>
+                  ) : destination === 'solana' && solanaAtaState === 'error' ? (
+                    <>Preview ready · verify before signing</>
+                  ) : (
+                    <>Connected wallet used when blank</>
+                  )}
+                </small>
               </div>
-            ) : (
-              <WalletSlot
-                network="tempo"
-                address={wallets.tempo?.address}
-                wallets={tempoContext.wallets}
-                onConnect={() => connectNetworkWallet('tempo')}
-                onSelect={tempoContext.select}
-                onDisconnect={tempoContext.disconnect}
-                label="Settlement signer"
-              />
-            )}
+            </WalletSlot>
           </div>
           <label className="field-label" htmlFor="send-amount">
             Send
@@ -505,56 +531,14 @@ export default function App() {
               label="Token you receive"
             />
           </div>
-          <small className="field-hint">
+          <small className="field-hint quote-hint">
             {status.kind === 'loading'
-              ? 'Finding the best route…'
+              ? 'Finding route…'
               : hopQuotes.length === 2
                 ? quoteLive
-                  ? 'Expected output across the full route.'
-                  : `Preview only — ${signingHint}`
-                : 'Enter an amount to preview the route.'}
-          </small>
-
-          <label className="field-label destination-label" htmlFor="dest-address">
-            Recipient address <span>(wallet address or paste)</span>
-          </label>
-          <div className="amount dest-field">
-            <input
-              id="dest-address"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder={destination === 'tempo' ? '0x…' : 'Paste Solana address…'}
-              value={destinationInput}
-              aria-describedby="dest-address-help"
-              aria-invalid={Boolean(manualError)}
-              onChange={(e) => {
-                setDestinationInput(e.target.value)
-                clearQuote()
-              }}
-            />
-          </div>
-          <small id="dest-address-help" className="field-hint" aria-live="polite">
-            {manualError ? (
-              <span className="dest-error">{manualError}</span>
-            ) : destination === 'solana' && solanaAtaState === 'checking' ? (
-              <>Quote preview is ready; verify the recipient wallet before signing.</>
-            ) : destination === 'solana' && solanaAtaState === 'missing' && recipientSolanaWallet ? (
-              <>Quote preview is ready · USDC account missing. <button type="button" className="inline-action" onClick={() => void initializeRecipientAccount()}>Initialize it now.</button></>
-            ) : destination === 'solana' && solanaAtaState === 'missing' ? (
-              <>Quote preview is ready. <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>Connect the recipient wallet once to initialize USDC.</button></>
-            ) : destination === 'solana' && solanaAtaState === 'error' ? (
-              <>Quote preview is ready, but the recipient USDC account must be verified before signing.</>
-            ) : destWallet?.address ? (
-              manualRecipient ? (
-                <>Overriding connected wallet · saved on this device.</>
-              ) : (
-                <>Using the connected wallet · or paste a different address.</>
-              )
-            ) : manualRecipient ? (
-              <>Saved on this device after quoting.</>
-            ) : (
-              <>Use the To wallet above, or paste a different recipient.</>
-            )}
+                  ? 'Final output across two hops.'
+                  : `Preview · ${signingHint}`
+                : 'Type an amount for a preview.'}
           </small>
 
           <RoutePath from={origin} to={destination} phase={routePhase} />
@@ -604,10 +588,10 @@ export default function App() {
       <section id="how" className="shell process" aria-label="How it works">
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
-          <Step n="01" t="Connect" d="Connect the sending wallet; paste the recipient below." />
-          <Step n="02" t="Quote" d="Type an amount — pricing is automatic." />
-          <Step n="03" t="Sign" d="Approve the signatures your wallet shows." />
-          <Step n="04" t="Receive" d="Track delivery to the end." />
+          <Step n="01" t="Connect" d="Source + recipient wallets." />
+          <Step n="02" t="Quote" d="Type an amount." />
+          <Step n="03" t="Sign" d="Approve both hops." />
+          <Step n="04" t="Receive" d="Track delivery." />
         </div>
       </section>
 
@@ -662,6 +646,7 @@ function WalletSlot({
   onSelect,
   onDisconnect,
   label,
+  children,
 }: {
   network: Network
   address?: string
@@ -670,6 +655,7 @@ function WalletSlot({
   onSelect: (walletId: string) => Promise<void>
   onDisconnect: (walletId: string) => Promise<void>
   label: string
+  children?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const logo = network === 'solana' ? <NetworkSolana className="slot-logo" aria-hidden /> : <NetworkTempo className="slot-logo" aria-hidden />
@@ -731,6 +717,7 @@ function WalletSlot({
           {logo} Connect {name}
         </button>
       )}
+      {children}
     </div>
   )
 }
