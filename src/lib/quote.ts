@@ -95,6 +95,9 @@ export function quoteErrorMessage(body: QuoteErrorBody, status: number): string 
     case 'quote_unavailable': {
       if (status === 429) return 'Across is rate-limiting quotes. Wait a few seconds and try again.'
       const upstream = extractUpstreamMessage(body.detail)
+      if (upstream && /associated token account does not exist|must initialize their token account/i.test(upstream)) {
+        return 'This Solana address needs a USDC account before it can receive. Create one in a Solana wallet, then retry.'
+      }
       if (upstream) return `Across: ${upstream}`
       return 'Across did not return a quote for this amount. Try a smaller amount.'
     }
