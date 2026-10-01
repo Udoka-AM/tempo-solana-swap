@@ -32,13 +32,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - name: Deploy Pages Functions and site
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npx wrangler pages deploy dist --project-name tempo-solana-swap --branch "pr-${{ github.event.pull_request.number }}"
-          else
-            npx wrangler pages deploy dist --project-name tempo-solana-swap --branch main
-          fi
+      # Pages applies secrets to deployments created after they are set,
+      # so sync them before deploying.
       - name: Synchronize production-only function secrets
         if: github.ref == 'refs/heads/main'
         env:
@@ -58,6 +53,13 @@ jobs:
               echo "::warning::$name is not set; integrator fees stay off for the affected route."
             fi
           done
+      - name: Deploy Pages Functions and site
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npx wrangler pages deploy dist --project-name tempo-solana-swap --branch "pr-${{ github.event.pull_request.number }}"
+          else
+            npx wrangler pages deploy dist --project-name tempo-solana-swap --branch main
+          fi
       - name: Post-deploy quote API QA (production)
         if: github.ref == 'refs/heads/main'
         run: |
