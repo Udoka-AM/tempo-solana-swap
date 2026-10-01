@@ -1,7 +1,7 @@
-import { VersionedTransaction } from '@solana/web3.js'
+import { Connection, VersionedTransaction } from '@solana/web3.js'
 import { BASE_CHAIN_ID, TEMPO_CHAIN_ID } from '../../shared/assets'
 import type { AcrossQuote, AcrossTransaction } from './quote'
-import { buildSolanaUsdcAtaTransaction, hasSolanaUsdcAta } from './solana-account'
+import { buildSolanaUsdcAtaTransaction, hasSolanaUsdcAta, SOLANA_RPC_URL } from './solana-account'
 
 type EvmWallet = {
   switchNetwork: (chainId: number) => Promise<void>
@@ -77,10 +77,13 @@ export async function initializeSolanaUsdcAta(wallet: SolanaWallet, owner: strin
   if (await hasSolanaUsdcAta(owner)) return undefined
   const signer = await wallet.connector.getSigner?.()
   if (!signer?.signAndSendTransaction) throw new Error('The selected wallet cannot initialize a Solana token account.')
-  const transaction = await buildSolanaUsdcAtaTransaction(wallet.address, owner)
+  const connection = new Connection(SOLANA_RPC_URL, 'confirmed')
+  const { transaction, blockhash, lastValidBlockHeight } = await buildSolanaUsdcAtaTransaction(wallet.address, owner, connection)
   onUpdate('submitting')
   const result = await signer.signAndSendTransaction(transaction)
   const signature = typeof result === 'string' ? result : result.signature
+  await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+  if (!(await hasSolanaUsdcAta(owner, connection))) throw new Error('The Solana USDC account was not initialized. Try again.')
   onUpdate('submitted', signature)
   return signature
 }

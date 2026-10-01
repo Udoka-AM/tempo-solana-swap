@@ -7,7 +7,7 @@ Non-custodial, stablecoin-only routes between Tempo (chain `4217`) and Solana ma
 - Tempo: `pathUSD`, `USDC.e`
 - Solana: native USDC. SOL is displayed as gas-only.
 - Directions: Tempo stablecoin → Base USDC → Solana USDC; Solana USDC → Base USDC → Tempo stablecoin.
-- Solana recipients must have a USDC associated token account. The app checks this before signing and can initialize it when the recipient wallet is connected.
+- Solana recipients must have a USDC associated token account. The app checks this before quoting and signing, and can initialize it when the recipient wallet is connected.
 - Unsupported or unavailable Across pairs are rejected rather than quoted synthetically.
 
 ## Local run

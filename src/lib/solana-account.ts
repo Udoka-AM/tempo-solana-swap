@@ -27,7 +27,7 @@ export async function buildSolanaUsdcAtaTransaction(
   const payerKey = new PublicKey(payer)
   const ownerKey = new PublicKey(owner)
   const ata = solanaUsdcAta(owner)
-  const { blockhash } = await connection.getLatestBlockhash('confirmed')
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
   const instruction = createAssociatedTokenAccountIdempotentInstruction(
     payerKey,
     ata,
@@ -41,5 +41,5 @@ export async function buildSolanaUsdcAtaTransaction(
     recentBlockhash: blockhash,
     instructions: [instruction],
   }).compileToV0Message()
-  return new VersionedTransaction(message)
+  return { transaction: new VersionedTransaction(message), blockhash, lastValidBlockHeight }
 }

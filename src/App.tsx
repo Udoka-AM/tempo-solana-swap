@@ -144,6 +144,8 @@ export default function App() {
           ? 'Checking the Solana recipient account.'
           : destination === 'solana' && solanaAtaState === 'missing' && !recipientSolanaWallet
             ? 'Connect the recipient Solana wallet once to initialize USDC.'
+            : destination === 'solana' && solanaAtaState === 'missing'
+              ? 'Initialize the Solana USDC account before quoting.'
             : 'Select the required signing wallet above.'
   const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
   const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
@@ -210,6 +212,26 @@ export default function App() {
     setSuccessOpen(false)
   }
 
+  async function initializeRecipientAccount() {
+    if (destination !== 'solana' || !recipientAddress || !recipientSolanaWallet) {
+      setDestinationInput('')
+      connectNetworkWallet('solana')
+      return
+    }
+    setStatus({ kind: 'submitting', message: 'Initialize the Solana USDC account in your wallet…' })
+    try {
+      await initializeSolanaUsdcAta(solanaContext.wallet as never, recipientAddress, (stage) => {
+        if (stage === 'submitting') setStatus({ kind: 'submitting', message: 'Initialize the Solana USDC account in your wallet…' })
+      })
+      setSolanaAtaState('ready')
+      clearQuote()
+      setAttemptSig('')
+      setStatus({ kind: 'idle' })
+    } catch (error) {
+      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Could not initialize the Solana USDC account.' })
+    }
+  }
+
   async function getQuote() {
     if (manualError) {
       setStatus({ kind: 'error', message: manualError })
@@ -217,6 +239,17 @@ export default function App() {
     }
     if (!hops) {
       setStatus({ kind: 'error', message: 'This pair cannot form a route.' })
+      return
+    }
+    if (destination === 'solana' && recipientAddress && solanaAtaState !== 'ready') {
+      setStatus({
+        kind: 'error',
+        message: solanaAtaState === 'missing'
+          ? recipientSolanaWallet
+            ? 'Initialize the recipient Solana USDC account before requesting a quote.'
+            : 'The Solana recipient has no USDC account. Connect that wallet once to initialize it.'
+          : 'The recipient Solana USDC account could not be verified. Try again.',
+      })
       return
     }
     // Hop 1 prices the send amount; hop 2 prices hop 1's output. Only the
@@ -495,19 +528,21 @@ export default function App() {
               spellCheck={false}
               placeholder={destination === 'tempo' ? '0x…' : 'Paste Solana address…'}
               value={destinationInput}
+              aria-describedby="dest-address-help"
+              aria-invalid={Boolean(manualError)}
               onChange={(e) => {
                 setDestinationInput(e.target.value)
                 clearQuote()
               }}
             />
           </div>
-          <small className="field-hint" aria-live="polite">
+          <small id="dest-address-help" className="field-hint" aria-live="polite">
             {manualError ? (
               <span className="dest-error">{manualError}</span>
             ) : destination === 'solana' && solanaAtaState === 'checking' ? (
               <>Checking the recipient’s Solana USDC account…</>
             ) : destination === 'solana' && solanaAtaState === 'missing' && recipientSolanaWallet ? (
-              <>USDC account missing · your wallet will initialize it before the bridge.</>
+              <>USDC account missing · <button type="button" className="inline-action" onClick={() => void initializeRecipientAccount()}>Initialize it now.</button></>
             ) : destination === 'solana' && solanaAtaState === 'missing' ? (
               <>This recipient has no Solana USDC account. <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>Connect it once to initialize.</button></>
             ) : destination === 'solana' && solanaAtaState === 'error' ? (
