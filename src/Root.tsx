@@ -9,7 +9,7 @@ const environmentId = import.meta.env.VITE_DYNAMIC_ENVIRONMENT_ID
 export default function Root() {
   if (!environmentId) return <main className="configuration-error"><strong>Wallet connection is not configured.</strong><span>Set VITE_DYNAMIC_ENVIRONMENT_ID in the Pages environment.</span></main>
   return (
-    <DynamicContextProvider settings={{ environmentId, appName: 'Tempo × Solana Swap', localStorageSuffix: 'tempo-solana', enableConnectOnlyFallback: true, networkValidationMode: 'never', overrides: { multiWallet: true }, walletConnectors: [EthereumWalletConnectors, SolanaWalletConnectors] }}>
+    <DynamicContextProvider settings={{ environmentId, appName: 'Tempo ⇌ Solana', localStorageSuffix: 'tempo-solana', enableConnectOnlyFallback: true, networkValidationMode: 'never', overrides: { multiWallet: true }, walletConnectors: [EthereumWalletConnectors, SolanaWalletConnectors] }}>
       <TempoWalletBridge>
         <SolanaWalletBridge>
           <App />

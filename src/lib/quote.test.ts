@@ -19,7 +19,7 @@ describe('quote error messages', () => {
   })
 
   it('calls out rate limiting distinctly', () => {
-    expect(quoteErrorMessage({ error: 'quote_unavailable' }, 429)).toMatch(/rate-limiting/)
+    expect(quoteErrorMessage({ error: 'quote_unavailable' }, 429)).toMatch(/rate-limited/)
   })
 
   it('rejects unsupported pairs plainly', () => {
@@ -29,7 +29,7 @@ describe('quote error messages', () => {
   it('extracts the Across message from upstream detail', () => {
     const detail = 'upstream_400:{"type":"AcrossApiError","message":"Destination swaps are not supported yet."}'
     expect(quoteErrorMessage({ error: 'quote_unavailable', detail }, 502)).toBe(
-      'Across: Destination swaps are not supported yet.',
+      'Destination swaps are not supported yet.',
     )
   })
 })

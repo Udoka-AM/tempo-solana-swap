@@ -93,16 +93,16 @@ export function quoteErrorMessage(body: QuoteErrorBody, status: number): string 
     case 'invalid_amount':
       return 'Enter an amount greater than zero.'
     case 'quote_unavailable': {
-      if (status === 429) return 'Across is rate-limiting quotes. Wait a few seconds and try again.'
+      if (status === 429) return 'Quotes are rate-limited right now. Wait a few seconds and try again.'
       const upstream = extractUpstreamMessage(body.detail)
       if (upstream && /associated token account does not exist|must initialize their token account/i.test(upstream)) {
         return 'This Solana address needs a USDC account before it can receive. Create one in a Solana wallet, then retry.'
       }
-      if (upstream) return `Across: ${upstream}`
-      return 'Across did not return a quote for this amount. Try a smaller amount.'
+      if (upstream) return upstream
+      return 'No quote is available for this amount. Try a smaller amount.'
     }
     case 'quote_upstream_unavailable':
-      return 'Could not reach Across. Check your connection and try again.'
+      return 'Could not reach the quote service. Check your connection and try again.'
     default:
       if (body.detail) return body.detail.slice(0, 200)
       return 'Quote is unavailable.'
@@ -127,7 +127,7 @@ export async function requestQuote(input: QuoteInput) {
     strictTradeType: 'true',
   })
   const response = await fetch(`/api/quote?${params}`)
-  const body = (await response.json()) as QuoteErrorBody
+  const body = (await response.json().catch(() => ({ error: 'quote_upstream_unavailable' }))) as QuoteErrorBody
   if (!response.ok) throw new Error(quoteErrorMessage(body, response.status))
   return normalizeQuote(body)
 }

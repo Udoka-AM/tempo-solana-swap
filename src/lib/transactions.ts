@@ -24,7 +24,7 @@ function assertFreshQuote(quote: AcrossQuote) {
 }
 
 function requireEvmTx(tx: AcrossTransaction | undefined) {
-  if (!tx?.to || !tx.data || !/^0x[0-9a-fA-F]*$/.test(tx.data)) throw new Error('Across did not return a compatible EVM transaction. Refresh the quote.')
+  if (!tx?.to || !tx.data || !/^0x[0-9a-fA-F]*$/.test(tx.data)) throw new Error('The quote did not include a compatible EVM transaction. Refresh the quote.')
   return { ...tx, data: tx.data as `0x${string}` }
 }
 
@@ -61,7 +61,7 @@ export function solanaTransactionData(quote: AcrossQuote) {
 export async function executeSolanaQuote(wallet: SolanaWallet, quote: AcrossQuote, onUpdate: ExecutionUpdate) {
   assertFreshQuote(quote)
   const serialized = solanaTransactionData(quote)
-  if (!serialized) throw new Error('Across did not return a supported Solana deposit. Refresh the quote.')
+  if (!serialized) throw new Error('The quote did not include a supported Solana transaction. Refresh the quote.')
   const signer = await wallet.connector.getSigner?.()
   if (!signer?.signAndSendTransaction) throw new Error('The selected wallet cannot sign a Solana transaction.')
   onUpdate('submitting')
