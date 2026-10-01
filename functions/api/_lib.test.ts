@@ -22,30 +22,31 @@ describe('integrator fee', () => {
   const leg = (from: number, to: number) =>
     new URLSearchParams({ originChainId: String(from), destinationChainId: String(to), amount: '1000000' })
 
-  it('charges only the leg that delivers to Tempo or Solana', () => {
-    expect(makeAcrossQuery(leg(TEMPO_CHAIN_ID, BASE_CHAIN_ID), 'id', feeEnv).get('appFee')).toBeNull()
-    const toSolana = makeAcrossQuery(leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID), 'id', feeEnv)
-    expect(toSolana.get('appFee')).toBe('0.0025')
-    expect(toSolana.get('appFeeRecipient')).toBe(svm)
+  it('charges only the leg that touches Tempo, once per swap', () => {
+    const tempoOut = makeAcrossQuery(leg(TEMPO_CHAIN_ID, BASE_CHAIN_ID), 'id', feeEnv)
+    expect(tempoOut.get('appFee')).toBe('0.0025')
+    expect(tempoOut.get('appFeeRecipient')).toBe(evm)
+    expect(makeAcrossQuery(leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID), 'id', feeEnv).get('appFee')).toBeNull()
+    expect(makeAcrossQuery(leg(SOLANA_CHAIN_ID, BASE_CHAIN_ID), 'id', feeEnv).get('appFee')).toBeNull()
     expect(makeAcrossQuery(leg(BASE_CHAIN_ID, TEMPO_CHAIN_ID), 'id', feeEnv).get('appFeeRecipient')).toBe(evm)
   })
 
   it('stays off when unset, malformed, or above the cap', () => {
-    expect(appFeeFor('solana', env)).toBeUndefined()
-    expect(appFeeFor('solana', { ...feeEnv, ACROSS_APP_FEE: '25' })).toBeUndefined()
-    expect(appFeeFor('solana', { ...feeEnv, ACROSS_APP_FEE: '0.2' })).toBeUndefined()
-    expect(appFeeFor('tempo', { ...feeEnv, ACROSS_FEE_RECIPIENT_EVM: svm })).toBeUndefined()
+    expect(appFeeFor('tempo', 'base', env)).toBeUndefined()
+    expect(appFeeFor('tempo', 'base', { ...feeEnv, ACROSS_APP_FEE: '25' })).toBeUndefined()
+    expect(appFeeFor('tempo', 'base', { ...feeEnv, ACROSS_APP_FEE: '0.2' })).toBeUndefined()
+    expect(appFeeFor('base', 'tempo', { ...feeEnv, ACROSS_FEE_RECIPIENT_EVM: svm })).toBeUndefined()
   })
 
-  it('retries without the fee when Across rejects the fee recipient', async () => {
+  it('retries without the fee when Across rejects a quote carrying it', async () => {
     const urls: string[] = []
     const fetcher = (async (url: string) => {
       urls.push(String(url))
       return urls.length === 1
-        ? new Response(JSON.stringify({ type: 'AcrossApiError', param: 'appFeeRecipient', message: 'no token account' }), { status: 400 })
+        ? new Response(JSON.stringify({ type: 'AcrossApiError', code: 'INVALID_PARAM', message: 'No bridge routes found' }), { status: 400 })
         : new Response(JSON.stringify({ quoteId: 'q_2' }))
     }) as unknown as typeof fetch
-    const params = leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID)
+    const params = leg(TEMPO_CHAIN_ID, BASE_CHAIN_ID)
     const response = await fetchAcrossQuote(params, feeEnv, fetcher)
     expect(response.status).toBe(200)
     expect(urls[0]).toContain('appFee=0.0025')
@@ -53,7 +54,7 @@ describe('integrator fee', () => {
   })
 
   it('ignores a caller-supplied fee', () => {
-    const params = leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID)
+    const params = leg(TEMPO_CHAIN_ID, BASE_CHAIN_ID)
     params.set('appFee', '0.5')
     params.set('appFeeRecipient', 'attacker')
     const query = makeAcrossQuery(params, 'id', env)

@@ -22,11 +22,13 @@ export function appFeeRate(env: Env): string | undefined {
   return value > 0 && value <= MAX_APP_FEE ? raw : undefined
 }
 
-// The fee is collected once per swap, on the leg that delivers to the user's
-// final network (Tempo or Solana). Across pays it on that destination chain.
-export function appFeeFor(destination: Network, env: Env): { appFee: string; appFeeRecipient: string } | undefined {
+// Every swap has exactly one leg that touches Tempo (Tempo -> Base or
+// Base -> Tempo), so charging only that leg bills each swap once. Across
+// pays the fee on the leg's destination chain, which is always EVM here.
+// (Across does not support app fees on the Base -> Solana USDC leg.)
+export function appFeeFor(origin: Network, destination: Network, env: Env): { appFee: string; appFeeRecipient: string } | undefined {
   const rate = appFeeRate(env)
-  if (!rate || destination === 'base') return undefined
+  if (!rate || (origin !== 'tempo' && destination !== 'tempo')) return undefined
   const recipient = destination === 'solana' ? env.ACROSS_FEE_RECIPIENT_SVM?.trim() : env.ACROSS_FEE_RECIPIENT_EVM?.trim()
   if (!recipient || !(destination === 'solana' ? SVM_ADDRESS : EVM_ADDRESS).test(recipient)) return undefined
   return { appFee: rate, appFeeRecipient: recipient }
@@ -101,8 +103,9 @@ export function makeAcrossQuery(params: URLSearchParams, integratorId: string, e
     if (value) result.set(key, value)
   }
   result.set('integratorId', integratorId)
+  const origin = toNetwork(params.get('originChainId'))
   const destination = toNetwork(params.get('destinationChainId'))
-  const fee = env && destination ? appFeeFor(destination, env) : undefined
+  const fee = env && origin && destination ? appFeeFor(origin, destination, env) : undefined
   if (fee) {
     result.set('appFee', fee.appFee)
     result.set('appFeeRecipient', fee.appFeeRecipient)
@@ -112,10 +115,10 @@ export function makeAcrossQuery(params: URLSearchParams, integratorId: string, e
 
 export async function fetchAcrossQuote(params: URLSearchParams, env: Env, fetcher: typeof fetch = fetch) {
   const first = await requestAcrossQuote(makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID, env), env, fetcher)
-  // A misconfigured fee recipient (e.g. a Solana wallet without a USDC token
-  // account) must never block a user's swap: retry once without the fee.
-  if (first.rejectedFeeRecipient) {
-    console.warn('app fee recipient rejected by Across; quoting without fee')
+  // Fee configuration must never block a user's swap: if Across rejects a
+  // quote that carries the fee, retry once without it.
+  if (first.rejectedWithFee) {
+    console.warn('Across rejected a quote with an app fee; quoting without fee')
     return (await requestAcrossQuote(makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID), env, fetcher)).response
   }
   return first.response
@@ -138,10 +141,9 @@ async function requestAcrossQuote(query: URLSearchParams, env: Env, fetcher: typ
   let body: unknown
   try { body = await response.json() } catch { body = { error: 'invalid_upstream_response' } }
   if (!response.ok) {
-    const rejectedFeeRecipient =
-      query.has('appFeeRecipient') && (body as { param?: unknown } | null)?.param === 'appFeeRecipient'
+    const rejectedWithFee = query.has('appFee') && response.status >= 400 && response.status < 500 && response.status !== 429
     return {
-      rejectedFeeRecipient,
+      rejectedWithFee,
       response: apiError('quote_unavailable', response.status === 429 ? 429 : 502, summarizeUpstream(body, response.status)),
     }
   }

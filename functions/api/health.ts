@@ -10,8 +10,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     timestamp: new Date().toISOString(),
     across: configured ? 'configured' : 'missing',
     fees: {
-      solana: appFeeFor('solana', env) ? 'on' : 'off',
-      tempo: appFeeFor('tempo', env) ? 'on' : 'off',
+      tempoToSolana: appFeeFor('tempo', 'base', env) ? 'on' : 'off',
+      solanaToTempo: appFeeFor('base', 'tempo', env) ? 'on' : 'off',
     },
   })
 }
