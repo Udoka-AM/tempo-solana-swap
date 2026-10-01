@@ -7,7 +7,7 @@ Non-custodial, stablecoin-only routes between Tempo (chain `4217`) and Solana ma
 - Tempo: `pathUSD`, `USDC.e`
 - Solana: native USDC. SOL is displayed as gas-only.
 - Directions: Tempo stablecoin → Base USDC → Solana USDC; Solana USDC → Base USDC → Tempo stablecoin.
-- Solana recipients must already have a USDC associated token account. The app checks this before signing; the current flow uses one connected source wallet plus a pasted destination address.
+- The current flow uses one connected source wallet plus a pasted destination address; Solana destination requirements are surfaced directly by Across.
 - Unsupported or unavailable Across pairs are rejected rather than quoted synthetically.
 
 ## Local run
@@ -42,7 +42,7 @@ The production workflow deploys `main`, then writes the two Across values as Pag
 
 ## Route architecture
 
-The app never requests a direct Tempo ↔ Solana quote. Each swap is quoted as two independent Across legs: Tempo ↔ Base USDC, then Base USDC ↔ Solana USDC. Tempo → Solana needs the sending Tempo wallet plus a Solana recipient address with an existing USDC account. Solana → Tempo can preview with a pasted Tempo address; signing that reverse direction will require the separate EVM settlement signer connection added in a later pass.
+The app never requests a direct Tempo ↔ Solana quote. Each swap is quoted as two independent Across legs: Tempo ↔ Base USDC, then Base USDC ↔ Solana USDC. Tempo → Solana needs the sending Tempo wallet plus a pasted Solana recipient address. Solana → Tempo can preview with a pasted Tempo address; signing that reverse direction will require the separate EVM settlement signer connection added in a later pass.
 
 ## Checks
 

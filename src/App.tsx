@@ -21,7 +21,6 @@ import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
 import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
-import { hasSolanaUsdcAta } from './lib/solana-account'
 import RoutePath from './components/RoutePath'
 import { type DynamicWallet, useSolanaWallet, useTempoWallet } from './components/wallet-context'
 
@@ -79,7 +78,6 @@ export default function App() {
   const [attemptSig, setAttemptSig] = useState('')
   const [apiState, setApiState] = useState<'checking' | 'live' | 'degraded'>('checking')
   const [successOpen, setSuccessOpen] = useState(false)
-  const [solanaAtaState, setSolanaAtaState] = useState<'idle' | 'checking' | 'ready' | 'missing' | 'error'>('idle')
 
   useEffect(() => {
     let cancelled = false
@@ -111,40 +109,13 @@ export default function App() {
   const manualError = manualRecipient ? validateAddressFor(destination, manualRecipient) : undefined
   const recipientAddress = !manualError && manualRecipient ? manualRecipient : undefined
 
-  useEffect(() => {
-    if (destination !== 'solana' || !recipientAddress || manualError) {
-      setSolanaAtaState('idle')
-      return
-    }
-    let cancelled = false
-    setSolanaAtaState('checking')
-    hasSolanaUsdcAta(recipientAddress)
-      .then((exists) => {
-        if (!cancelled) setSolanaAtaState(exists ? 'ready' : 'missing')
-      })
-      .catch(() => {
-        if (!cancelled) setSolanaAtaState('error')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [destination, manualError, recipientAddress])
-
-  const canPrepareSolanaRecipient =
-    destination !== 'solana' || solanaAtaState === 'ready'
   const signingHint = !originWallet
     ? `Connect ${origin === 'tempo' ? 'Tempo' : 'Solana'} to sign.`
     : !recipientAddress
       ? 'Add a recipient to sign.'
-          : origin === 'solana' && !wallets.tempo
+      : origin === 'solana' && !wallets.tempo
         ? 'Tempo signer required for this direction.'
-        : destination === 'solana' && solanaAtaState === 'checking'
-          ? 'Verify the recipient before signing.'
-          : destination === 'solana' && solanaAtaState === 'missing'
-            ? 'Recipient USDC account required.'
-              : destination === 'solana' && solanaAtaState === 'error'
-                ? 'Verify the Solana account.'
-                : 'Connect required wallets.'
+        : 'Connect required wallets.'
   const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
   const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
   const quoteLive = Boolean(
@@ -153,8 +124,7 @@ export default function App() {
       hopMetas.length === 2 &&
       originWallet?.address === hopMetas[0]?.depositor &&
       recipientAddress === hopMetas[1]?.recipient &&
-      (origin === 'tempo' || wallets.tempo?.address === hopMetas[1]?.depositor) &&
-      canPrepareSolanaRecipient,
+      (origin === 'tempo' || wallets.tempo?.address === hopMetas[1]?.depositor),
   )
   const receive = hopQuotes[1]?.expectedOutputAmount
     ? fromAtomicAmount(hopQuotes[1].expectedOutputAmount, hops?.[1].output.decimals ?? 6)
@@ -224,15 +194,9 @@ export default function App() {
     // sides fall back to placeholders for a preview that can never be signed.
     const sender = originWallet?.address ?? previewAddressFor(origin)
     const final = recipientAddress ?? previewAddressFor(destination)
-    // Across can price the route before a Solana recipient has initialized its
-    // USDC account. Use a neutral recipient for that indicative preview; the
-    // real recipient is re-quoted after its ATA is verified and can be signed.
-    const quoteFinal = destination === 'solana' && recipientAddress && solanaAtaState !== 'ready'
-      ? previewAddressFor('solana')
-      : final
     const evmSigner = wallets.tempo?.address ?? previewAddressFor('base')
-    const [parties1, parties2] = hopParties(origin, sender, quoteFinal, evmSigner)
-    const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo) && canPrepareSolanaRecipient)
+    const [parties1, parties2] = hopParties(origin, sender, final, evmSigner)
+    const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo))
     setStatus({ kind: 'loading', message: 'Finding your route…' })
     try {
       const first = await requestQuote({
@@ -423,12 +387,6 @@ export default function App() {
                 <small id="dest-address-help" className="slot-status" aria-live="polite">
                   {manualError ? (
                     <span className="dest-error">{manualError}</span>
-                  ) : destination === 'solana' && solanaAtaState === 'checking' ? (
-                    <>Verifying recipient…</>
-                  ) : destination === 'solana' && solanaAtaState === 'missing' ? (
-                    <>Recipient USDC account required to sign</>
-                  ) : destination === 'solana' && solanaAtaState === 'error' ? (
-                    <>Could not verify recipient</>
                   ) : (
                     <>Paste an address to quote</>
                   )}
