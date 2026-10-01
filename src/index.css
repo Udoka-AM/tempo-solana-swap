@@ -178,7 +178,9 @@ button:disabled { cursor: not-allowed; }
 .wallet-pair { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: end; gap: 8px; margin: 0 0 14px; }
 .wallet-pair-arrow { justify-self: center; color: var(--accent); margin-bottom: 10px; }
 .wallet-slot { position: relative; display: grid; gap: 6px; min-width: 0; }
+.recipient-slot { display: grid; gap: 6px; min-width: 0; }
 .wallet-slot > small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.recipient-slot > small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
 .slot-chip, .slot-connect { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 10px; font-size: 11px; min-width: 0; }
 .slot-chip { background: var(--bg); cursor: pointer; text-align: left; }
 .slot-chip strong { font-size: 11px; }

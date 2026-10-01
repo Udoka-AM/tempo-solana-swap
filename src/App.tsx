@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { NetworkSolana, NetworkTempo, tokenIcons } from '@web3icons/react'
 import {
   ArrowUpDown,
@@ -20,7 +20,7 @@ import { corridorLabel, type RoutePhase } from './lib/route-viz'
 import type { Direction } from './lib/multihop'
 import { hopParties, planHops } from './lib/multihop'
 import { loadSavedDestination, saveDestination, validateAddressFor } from './lib/addresses'
-import { executeEvmQuote, executeSolanaQuote, initializeSolanaUsdcAta, type ExecutionUpdate } from './lib/transactions'
+import { executeEvmQuote, executeSolanaQuote, type ExecutionUpdate } from './lib/transactions'
 import { hasSolanaUsdcAta } from './lib/solana-account'
 import RoutePath from './components/RoutePath'
 import { type DynamicWallet, useSolanaWallet, useTempoWallet } from './components/wallet-context'
@@ -101,17 +101,15 @@ export default function App() {
 
   const wallets = { tempo: tempoContext.wallet, solana: solanaContext.wallet }
   const originWallet = wallets[origin]
-  const destWallet = wallets[destination]
   // Multihop corridor via Base: Tempo -> Base USDC -> Solana USDC (or reverse).
   // Ends are selectable; the proxy hop is automatic.
   const hops = useMemo(() => planHops(origin, inputId, outputId), [origin, inputId, outputId])
   const supported = Boolean(hops) && hops!.every((hop) => isSupportedPair(hop.origin, hop.input.id, hop.destination, hop.output.id))
-  // One signing wallet + a destination address. The destination comes from a
-  // second connected wallet when present, else from the pasted (saved) input.
+  // One signing wallet + a pasted destination. A second wallet context is
+  // intentionally deferred until the single-wallet flow is stable.
   const manualRecipient = destinationInput.trim()
   const manualError = manualRecipient ? validateAddressFor(destination, manualRecipient) : undefined
-  const recipientAddress = !manualError && manualRecipient ? manualRecipient : destWallet?.address
-  const recipientSolanaWallet = solanaContext.wallet?.address === recipientAddress
+  const recipientAddress = !manualError && manualRecipient ? manualRecipient : undefined
 
   useEffect(() => {
     if (destination !== 'solana' || !recipientAddress || manualError) {
@@ -133,19 +131,17 @@ export default function App() {
   }, [destination, manualError, recipientAddress])
 
   const canPrepareSolanaRecipient =
-    destination !== 'solana' || solanaAtaState === 'ready' || (solanaAtaState === 'missing' && recipientSolanaWallet)
+    destination !== 'solana' || solanaAtaState === 'ready'
   const signingHint = !originWallet
     ? `Connect ${origin === 'tempo' ? 'Tempo' : 'Solana'} to sign.`
     : !recipientAddress
       ? 'Add a recipient to sign.'
-      : origin === 'solana' && !wallets.tempo
-        ? 'Connect the Tempo signer.'
+          : origin === 'solana' && !wallets.tempo
+        ? 'Tempo signer required for this direction.'
         : destination === 'solana' && solanaAtaState === 'checking'
           ? 'Verify the recipient before signing.'
-          : destination === 'solana' && solanaAtaState === 'missing' && !recipientSolanaWallet
-            ? 'Connect the recipient once.'
-            : destination === 'solana' && solanaAtaState === 'missing'
-              ? 'Initialize USDC once.'
+          : destination === 'solana' && solanaAtaState === 'missing'
+            ? 'Recipient USDC account required.'
               : destination === 'solana' && solanaAtaState === 'error'
                 ? 'Verify the Solana account.'
                 : 'Connect required wallets.'
@@ -212,26 +208,6 @@ export default function App() {
     clearQuote()
     setStatus({ kind: 'idle' })
     setSuccessOpen(false)
-  }
-
-  async function initializeRecipientAccount() {
-    if (destination !== 'solana' || !recipientAddress || !recipientSolanaWallet) {
-      setDestinationInput('')
-      connectNetworkWallet('solana')
-      return
-    }
-    setStatus({ kind: 'submitting', message: 'Initialize the Solana USDC account in your wallet…' })
-    try {
-      await initializeSolanaUsdcAta(solanaContext.wallet as never, recipientAddress, (stage) => {
-        if (stage === 'submitting') setStatus({ kind: 'submitting', message: 'Initialize the Solana USDC account in your wallet…' })
-      })
-      setSolanaAtaState('ready')
-      clearQuote()
-      setAttemptSig('')
-      setStatus({ kind: 'idle' })
-    } catch (error) {
-      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Could not initialize the Solana USDC account.' })
-    }
   }
 
   async function getQuote() {
@@ -342,16 +318,6 @@ export default function App() {
     }
     try {
       setStatus({ kind: 'submitting', message: 'Submitting signature 1 of 2…' })
-      if (destination === 'solana' && solanaAtaState === 'missing') {
-        await initializeSolanaUsdcAta(solanaContext.wallet as never, recipientAddress!, (stage, reference) => {
-          if (stage === 'submitted' && reference) {
-            setStatus({ kind: 'submitting', reference, message: 'USDC account initialized — signing the bridge…' })
-          } else {
-            setStatus({ kind: 'submitting', message: 'Initialize the Solana USDC account in your wallet…' })
-          }
-        })
-        setSolanaAtaState('ready')
-      }
       const hash1 = await runHop(0)
       setStatus({ kind: 'submitting', reference: hash1, references: [hash1], message: 'First signature done — sign the second…' })
       const hash2 = await runHop(1)
@@ -396,7 +362,7 @@ export default function App() {
             <h1>
               Move stablecoins between <em>Tempo</em> and Solana.
             </h1>
-          <p className="hero-sub">Connect on one side. Paste or connect on the other.</p>
+          <p className="hero-sub">Connect the source. Paste the destination.</p>
           </div>
           <aside className="scope-card" id="scope" aria-label="Release scope">
             <small>SUPPORTED ASSETS</small>
@@ -425,7 +391,7 @@ export default function App() {
             </button>
           </div>
 
-          <div className="wallet-pair" aria-label="Wallets">
+          <div className="wallet-pair" aria-label="Source wallet and pasted destination">
             <WalletSlot
               network={origin}
               address={originWallet?.address}
@@ -436,17 +402,10 @@ export default function App() {
               label="Send from"
             />
             <ArrowUpRight className="wallet-pair-arrow" aria-hidden />
-            <WalletSlot
-              network={destination}
-              address={destWallet?.address}
-              wallets={destination === 'tempo' ? tempoContext.wallets : solanaContext.wallets}
-              onConnect={() => connectNetworkWallet(destination)}
-              onSelect={destination === 'tempo' ? tempoContext.select : solanaContext.select}
-              onDisconnect={destination === 'tempo' ? tempoContext.disconnect : solanaContext.disconnect}
-              label={`To ${destination === 'tempo' ? 'Tempo' : 'Solana'}`}
-            >
+            <div className="recipient-slot">
+              <small>To {destination === 'tempo' ? 'Tempo' : 'Solana'}</small>
               <div className="slot-address">
-                <span className="slot-or">or paste address</span>
+                <span className="slot-or">paste destination</span>
                 <input
                   className="slot-address-input"
                   id="dest-address"
@@ -466,18 +425,16 @@ export default function App() {
                     <span className="dest-error">{manualError}</span>
                   ) : destination === 'solana' && solanaAtaState === 'checking' ? (
                     <>Verifying recipient…</>
-                  ) : destination === 'solana' && solanaAtaState === 'missing' && recipientSolanaWallet ? (
-                    <>USDC account missing · <button type="button" className="inline-action" onClick={() => void initializeRecipientAccount()}>Initialize</button></>
                   ) : destination === 'solana' && solanaAtaState === 'missing' ? (
-                    <>Preview ready · <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>connect recipient once</button></>
+                    <>Recipient USDC account required to sign</>
                   ) : destination === 'solana' && solanaAtaState === 'error' ? (
-                    <>Preview ready · verify before signing</>
+                    <>Could not verify recipient</>
                   ) : (
-                    <>Connected wallet used when blank</>
+                    <>Paste an address to quote</>
                   )}
                 </small>
               </div>
-            </WalletSlot>
+            </div>
           </div>
           <label className="field-label" htmlFor="send-amount">
             Send
@@ -588,7 +545,7 @@ export default function App() {
       <section id="how" className="shell process" aria-label="How it works">
         <p className="kicker">How it works · 02</p>
         <div className="process-grid">
-          <Step n="01" t="Connect" d="Source + recipient wallets." />
+          <Step n="01" t="Connect" d="Source wallet + address." />
           <Step n="02" t="Quote" d="Type an amount." />
           <Step n="03" t="Sign" d="Approve both hops." />
           <Step n="04" t="Receive" d="Track delivery." />
@@ -646,7 +603,6 @@ function WalletSlot({
   onSelect,
   onDisconnect,
   label,
-  children,
 }: {
   network: Network
   address?: string
@@ -655,7 +611,6 @@ function WalletSlot({
   onSelect: (walletId: string) => Promise<void>
   onDisconnect: (walletId: string) => Promise<void>
   label: string
-  children?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const logo = network === 'solana' ? <NetworkSolana className="slot-logo" aria-hidden /> : <NetworkTempo className="slot-logo" aria-hidden />
@@ -717,7 +672,6 @@ function WalletSlot({
           {logo} Connect {name}
         </button>
       )}
-      {children}
     </div>
   )
 }
