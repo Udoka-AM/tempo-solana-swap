@@ -141,11 +141,13 @@ export default function App() {
       : origin === 'solana' && !wallets.tempo
         ? 'Connect a Tempo settlement signer to sign the Base leg.'
         : destination === 'solana' && solanaAtaState === 'checking'
-          ? 'Checking the Solana recipient account.'
+          ? 'Connect the recipient wallet to verify it before signing.'
           : destination === 'solana' && solanaAtaState === 'missing' && !recipientSolanaWallet
-            ? 'Connect the recipient Solana wallet once to initialize USDC.'
+            ? 'Connect the recipient Solana wallet once to initialize USDC before signing.'
             : destination === 'solana' && solanaAtaState === 'missing'
-              ? 'Initialize the Solana USDC account before quoting.'
+              ? 'Initialize the recipient Solana USDC account before signing.'
+              : destination === 'solana' && solanaAtaState === 'error'
+                ? 'Verify the recipient Solana USDC account before signing.'
             : 'Select the required signing wallet above.'
   const [hopQuotes, setHopQuotes] = useState<AcrossQuote[]>([])
   const [hopMetas, setHopMetas] = useState<{ depositor: string; recipient: string }[]>([])
@@ -241,24 +243,19 @@ export default function App() {
       setStatus({ kind: 'error', message: 'This pair cannot form a route.' })
       return
     }
-    if (destination === 'solana' && recipientAddress && solanaAtaState !== 'ready') {
-      setStatus({
-        kind: 'error',
-        message: solanaAtaState === 'missing'
-          ? recipientSolanaWallet
-            ? 'Initialize the recipient Solana USDC account before requesting a quote.'
-            : 'The Solana recipient has no USDC account. Connect that wallet once to initialize it.'
-          : 'The recipient Solana USDC account could not be verified. Try again.',
-      })
-      return
-    }
     // Hop 1 prices the send amount; hop 2 prices hop 1's output. Only the
     // sending wallet signs hop 1 and the EVM side signs hop 2 — missing
     // sides fall back to placeholders for a preview that can never be signed.
     const sender = originWallet?.address ?? previewAddressFor(origin)
     const final = recipientAddress ?? previewAddressFor(destination)
+    // Across can price the route before a Solana recipient has initialized its
+    // USDC account. Use a neutral recipient for that indicative preview; the
+    // real recipient is re-quoted after its ATA is verified and can be signed.
+    const quoteFinal = destination === 'solana' && recipientAddress && solanaAtaState !== 'ready'
+      ? previewAddressFor('solana')
+      : final
     const evmSigner = wallets.tempo?.address ?? previewAddressFor('base')
-    const [parties1, parties2] = hopParties(origin, sender, final, evmSigner)
+    const [parties1, parties2] = hopParties(origin, sender, quoteFinal, evmSigner)
     const live = Boolean(originWallet && recipientAddress && (origin === 'tempo' || wallets.tempo) && canPrepareSolanaRecipient)
     setStatus({ kind: 'loading', message: 'Finding your route…' })
     try {
@@ -540,13 +537,13 @@ export default function App() {
             {manualError ? (
               <span className="dest-error">{manualError}</span>
             ) : destination === 'solana' && solanaAtaState === 'checking' ? (
-              <>Checking the recipient’s Solana USDC account…</>
+              <>Quote preview is ready; verify the recipient wallet before signing.</>
             ) : destination === 'solana' && solanaAtaState === 'missing' && recipientSolanaWallet ? (
-              <>USDC account missing · <button type="button" className="inline-action" onClick={() => void initializeRecipientAccount()}>Initialize it now.</button></>
+              <>Quote preview is ready · USDC account missing. <button type="button" className="inline-action" onClick={() => void initializeRecipientAccount()}>Initialize it now.</button></>
             ) : destination === 'solana' && solanaAtaState === 'missing' ? (
-              <>This recipient has no Solana USDC account. <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>Connect it once to initialize.</button></>
+              <>Quote preview is ready. <button type="button" className="inline-action" onClick={() => { setDestinationInput(''); connectNetworkWallet('solana') }}>Connect the recipient wallet once to initialize USDC.</button></>
             ) : destination === 'solana' && solanaAtaState === 'error' ? (
-              <>Could not verify the recipient’s Solana USDC account. Try again.</>
+              <>Quote preview is ready, but the recipient USDC account must be verified before signing.</>
             ) : destWallet?.address ? (
               manualRecipient ? (
                 <>Overriding connected wallet · saved on this device.</>
