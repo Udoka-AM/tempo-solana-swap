@@ -4,6 +4,32 @@ export type Env = {
   ACROSS_API_KEY: string
   ACROSS_INTEGRATOR_ID: string
   PUBLIC_APP_ORIGIN?: string
+  // Integrator fee: a decimal fraction (0.0025 = 0.25%) plus one recipient
+  // per destination ecosystem. Fees are off unless all of them are valid.
+  ACROSS_APP_FEE?: string
+  ACROSS_FEE_RECIPIENT_EVM?: string
+  ACROSS_FEE_RECIPIENT_SVM?: string
+}
+
+const MAX_APP_FEE = 0.05
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const SVM_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+
+export function appFeeRate(env: Env): string | undefined {
+  const raw = env.ACROSS_APP_FEE?.trim()
+  if (!raw || !/^0?\.\d+$/.test(raw)) return undefined
+  const value = Number(raw)
+  return value > 0 && value <= MAX_APP_FEE ? raw : undefined
+}
+
+// The fee is collected once per swap, on the leg that delivers to the user's
+// final network (Tempo or Solana). Across pays it on that destination chain.
+export function appFeeFor(destination: Network, env: Env): { appFee: string; appFeeRecipient: string } | undefined {
+  const rate = appFeeRate(env)
+  if (!rate || destination === 'base') return undefined
+  const recipient = destination === 'solana' ? env.ACROSS_FEE_RECIPIENT_SVM?.trim() : env.ACROSS_FEE_RECIPIENT_EVM?.trim()
+  if (!recipient || !(destination === 'solana' ? SVM_ADDRESS : EVM_ADDRESS).test(recipient)) return undefined
+  return { appFee: rate, appFeeRecipient: recipient }
 }
 
 const ACROSS_API = 'https://app.across.to/api'
@@ -68,13 +94,19 @@ export function validateQuote(request: Request): { error: Response; params?: nev
   return { params, input, output } as const
 }
 
-export function makeAcrossQuery(params: URLSearchParams, integratorId: string) {
+export function makeAcrossQuery(params: URLSearchParams, integratorId: string, env?: Env) {
   const result = new URLSearchParams()
   for (const key of allowedQuoteFields) {
     const value = params.get(key)
     if (value) result.set(key, value)
   }
   result.set('integratorId', integratorId)
+  const destination = toNetwork(params.get('destinationChainId'))
+  const fee = env && destination ? appFeeFor(destination, env) : undefined
+  if (fee) {
+    result.set('appFee', fee.appFee)
+    result.set('appFeeRecipient', fee.appFeeRecipient)
+  }
   return result
 }
 
@@ -83,7 +115,7 @@ export async function fetchAcrossQuote(params: URLSearchParams, env: Env, fetche
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   let response: Response
   try {
-    response = await fetcher(`${ACROSS_API}/swap/approval?${makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID)}`, {
+    response = await fetcher(`${ACROSS_API}/swap/approval?${makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID, env)}`, {
       headers: { authorization: `Bearer ${env.ACROSS_API_KEY}`, 'user-agent': 'tempo-solana-swap/1.0' },
       signal: controller.signal,
     })

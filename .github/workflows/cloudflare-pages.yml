@@ -44,9 +44,20 @@ jobs:
         env:
           ACROSS_API_KEY: ${{ secrets.ACROSS_API_KEY }}
           ACROSS_INTEGRATOR_ID: ${{ secrets.ACROSS_INTEGRATOR_ID }}
+          ACROSS_APP_FEE: ${{ secrets.ACROSS_APP_FEE }}
+          ACROSS_FEE_RECIPIENT_EVM: ${{ secrets.ACROSS_FEE_RECIPIENT_EVM }}
+          ACROSS_FEE_RECIPIENT_SVM: ${{ secrets.ACROSS_FEE_RECIPIENT_SVM }}
         run: |
           printf '%s' "$ACROSS_API_KEY" | npx wrangler pages secret put ACROSS_API_KEY --project-name tempo-solana-swap
           printf '%s' "$ACROSS_INTEGRATOR_ID" | npx wrangler pages secret put ACROSS_INTEGRATOR_ID --project-name tempo-solana-swap
+          for name in ACROSS_APP_FEE ACROSS_FEE_RECIPIENT_EVM ACROSS_FEE_RECIPIENT_SVM; do
+            value="${!name}"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx wrangler pages secret put "$name" --project-name tempo-solana-swap
+            else
+              echo "::warning::$name is not set; integrator fees stay off for the affected route."
+            fi
+          done
       - name: Post-deploy quote API QA (production)
         if: github.ref == 'refs/heads/main'
         run: |

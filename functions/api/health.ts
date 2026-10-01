@@ -1,4 +1,4 @@
-import { assertSameOrigin, json, type Env } from './_lib'
+import { appFeeFor, assertSameOrigin, json, type Env } from './_lib'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const denied = assertSameOrigin(request, env)
@@ -9,5 +9,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     service: 'tempo-solana-swap',
     timestamp: new Date().toISOString(),
     across: configured ? 'configured' : 'missing',
+    fees: {
+      solana: appFeeFor('solana', env) ? 'on' : 'off',
+      tempo: appFeeFor('tempo', env) ? 'on' : 'off',
+    },
   })
 }

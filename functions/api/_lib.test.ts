@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BASE_CHAIN_ID, SOLANA_CHAIN_ID, TEMPO_CHAIN_ID } from '../../shared/assets'
 import {
+  appFeeFor,
+  makeAcrossQuery,
   fetchAcrossMeta,
   fetchAcrossQuote,
   fetchDepositStatus,
@@ -12,6 +14,38 @@ import {
 
 const env: Env = { ACROSS_API_KEY: 'server-secret', ACROSS_INTEGRATOR_ID: 'integrator-live-id' }
 const validPath = `/api/quote?amount=1000000&inputToken=0x20c0000000000000000000000000000000000000&outputToken=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&originChainId=${TEMPO_CHAIN_ID}&destinationChainId=${BASE_CHAIN_ID}&depositor=0xabc&recipient=0xdef`
+
+describe('integrator fee', () => {
+  const evm = '0x1111111111111111111111111111111111111111'
+  const svm = 'GNaeRSd8Q2LRsTVubmdBF3NzHX8KTSeLUV2rMxN2oMHL'
+  const feeEnv: Env = { ...env, ACROSS_APP_FEE: '0.0025', ACROSS_FEE_RECIPIENT_EVM: evm, ACROSS_FEE_RECIPIENT_SVM: svm }
+  const leg = (from: number, to: number) =>
+    new URLSearchParams({ originChainId: String(from), destinationChainId: String(to), amount: '1000000' })
+
+  it('charges only the leg that delivers to Tempo or Solana', () => {
+    expect(makeAcrossQuery(leg(TEMPO_CHAIN_ID, BASE_CHAIN_ID), 'id', feeEnv).get('appFee')).toBeNull()
+    const toSolana = makeAcrossQuery(leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID), 'id', feeEnv)
+    expect(toSolana.get('appFee')).toBe('0.0025')
+    expect(toSolana.get('appFeeRecipient')).toBe(svm)
+    expect(makeAcrossQuery(leg(BASE_CHAIN_ID, TEMPO_CHAIN_ID), 'id', feeEnv).get('appFeeRecipient')).toBe(evm)
+  })
+
+  it('stays off when unset, malformed, or above the cap', () => {
+    expect(appFeeFor('solana', env)).toBeUndefined()
+    expect(appFeeFor('solana', { ...feeEnv, ACROSS_APP_FEE: '25' })).toBeUndefined()
+    expect(appFeeFor('solana', { ...feeEnv, ACROSS_APP_FEE: '0.2' })).toBeUndefined()
+    expect(appFeeFor('tempo', { ...feeEnv, ACROSS_FEE_RECIPIENT_EVM: svm })).toBeUndefined()
+  })
+
+  it('ignores a caller-supplied fee', () => {
+    const params = leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID)
+    params.set('appFee', '0.5')
+    params.set('appFeeRecipient', 'attacker')
+    const query = makeAcrossQuery(params, 'id', env)
+    expect(query.get('appFee')).toBeNull()
+    expect(query.get('appFeeRecipient')).toBeNull()
+  })
+})
 
 describe('same-origin Across quote proxy', () => {
   it('accepts only the stablecoin release pairs', () => {

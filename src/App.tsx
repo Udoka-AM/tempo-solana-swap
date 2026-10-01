@@ -466,8 +466,9 @@ export default function App() {
         <div className="topbar-inner">
           <a href="#top" className="brand" aria-label="Tempo ⇌ Solana home">
             <span className="brand-mark" aria-hidden>⇌</span>
-            <span className="brand-name">
-              Tempo <b>⇌</b> Solana
+            <span className="brand-logos" aria-hidden>
+              <NetworkTempo variant="mono" className="brand-logo brand-logo-tempo" />
+              <NetworkSolana variant="branded" className="brand-logo" />
             </span>
           </a>
           <nav className={`nav ${navOpen ? 'open' : ''}`} aria-label="Primary">

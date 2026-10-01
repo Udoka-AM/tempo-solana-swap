@@ -80,8 +80,9 @@ button:disabled { cursor: not-allowed; }
   background: var(--accent); color: var(--accent-ink);
   font-size: 18px; line-height: 1;
 }
-.brand-name { font-size: 17px; }
-.brand-name b { color: var(--accent); font-weight: 700; padding: 0 1px; }
+.brand-logos { display: inline-flex; align-items: center; gap: 2px; }
+.brand-logo { width: 36px; height: 36px; display: block; }
+.brand-logo-tempo { color: var(--ink); }
 
 .nav { display: flex; gap: 4px; margin-left: 12px; }
 .nav-pill {
@@ -404,7 +405,7 @@ button:disabled { cursor: not-allowed; }
   .topbar-inner { gap: 4px; }
   .topbar-actions { gap: 4px; }
   .brand { gap: 8px; min-width: 0; }
-  .brand-name { font-size: 15px; }
+  .brand-logo { width: 32px; height: 32px; }
   .brand-mark { width: 28px; height: 28px; font-size: 16px; border-radius: 9px; }
   .icon-btn { width: 34px; height: 34px; }
   .wallet-btn.connect { padding: 0 12px; }
@@ -413,7 +414,6 @@ button:disabled { cursor: not-allowed; }
   .wallet-btn:not(.connect) { padding: 0 6px; }
 }
 @media (max-width: 360px) {
-  .brand-name { font-size: 14px; }
   .token-pill { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
