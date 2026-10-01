@@ -111,28 +111,41 @@ export function makeAcrossQuery(params: URLSearchParams, integratorId: string, e
 }
 
 export async function fetchAcrossQuote(params: URLSearchParams, env: Env, fetcher: typeof fetch = fetch) {
+  const first = await requestAcrossQuote(makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID, env), env, fetcher)
+  // A misconfigured fee recipient (e.g. a Solana wallet without a USDC token
+  // account) must never block a user's swap: retry once without the fee.
+  if (first.rejectedFeeRecipient) {
+    console.warn('app fee recipient rejected by Across; quoting without fee')
+    return (await requestAcrossQuote(makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID), env, fetcher)).response
+  }
+  return first.response
+}
+
+async function requestAcrossQuote(query: URLSearchParams, env: Env, fetcher: typeof fetch) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   let response: Response
   try {
-    response = await fetcher(`${ACROSS_API}/swap/approval?${makeAcrossQuery(params, env.ACROSS_INTEGRATOR_ID, env)}`, {
+    response = await fetcher(`${ACROSS_API}/swap/approval?${query}`, {
       headers: { authorization: `Bearer ${env.ACROSS_API_KEY}`, 'user-agent': 'tempo-solana-swap/1.0' },
       signal: controller.signal,
     })
   } catch (error) {
-    return apiError('quote_upstream_unavailable', 502, error instanceof Error ? error.name : 'fetch_failed')
+    return { response: apiError('quote_upstream_unavailable', 502, error instanceof Error ? error.name : 'fetch_failed') }
   } finally {
     clearTimeout(timeout)
   }
   let body: unknown
   try { body = await response.json() } catch { body = { error: 'invalid_upstream_response' } }
-  if (!response.ok)
-    return apiError(
-      'quote_unavailable',
-      response.status === 429 ? 429 : 502,
-      summarizeUpstream(body, response.status),
-    )
-  return json(body)
+  if (!response.ok) {
+    const rejectedFeeRecipient =
+      query.has('appFeeRecipient') && (body as { param?: unknown } | null)?.param === 'appFeeRecipient'
+    return {
+      rejectedFeeRecipient,
+      response: apiError('quote_unavailable', response.status === 429 ? 429 : 502, summarizeUpstream(body, response.status)),
+    }
+  }
+  return { response: json(body) }
 }
 
 const allowedDepositStatusFields = ['originChainId', 'depositId', 'depositTxnRef'] as const

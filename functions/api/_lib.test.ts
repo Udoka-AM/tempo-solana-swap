@@ -37,6 +37,21 @@ describe('integrator fee', () => {
     expect(appFeeFor('tempo', { ...feeEnv, ACROSS_FEE_RECIPIENT_EVM: svm })).toBeUndefined()
   })
 
+  it('retries without the fee when Across rejects the fee recipient', async () => {
+    const urls: string[] = []
+    const fetcher = (async (url: string) => {
+      urls.push(String(url))
+      return urls.length === 1
+        ? new Response(JSON.stringify({ type: 'AcrossApiError', param: 'appFeeRecipient', message: 'no token account' }), { status: 400 })
+        : new Response(JSON.stringify({ quoteId: 'q_2' }))
+    }) as unknown as typeof fetch
+    const params = leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID)
+    const response = await fetchAcrossQuote(params, feeEnv, fetcher)
+    expect(response.status).toBe(200)
+    expect(urls[0]).toContain('appFee=0.0025')
+    expect(urls[1]).not.toContain('appFee')
+  })
+
   it('ignores a caller-supplied fee', () => {
     const params = leg(BASE_CHAIN_ID, SOLANA_CHAIN_ID)
     params.set('appFee', '0.5')
